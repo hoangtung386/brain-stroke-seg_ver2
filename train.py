@@ -63,14 +63,14 @@ class SymFormerTrainer:
         
         self.best_dice = 0.0
         self.history = []
+        self.loss_accumulators = {}
         
     def train_epoch(self, epoch):
         """Train one epoch"""
         self.model.train()
         total_loss = 0
-        total_seg = 0
-        total_cluster = 0
-        total_sym = 0
+        total_loss = 0
+        # total_seg/cluster/sym are now handled dynamically via self.loss_accumulators
         
         pbar = tqdm(self.train_loader, desc=f"Epoch {epoch} [Train]")
         for batch in pbar:
@@ -115,32 +115,33 @@ class SymFormerTrainer:
             
             # Accumulate metrics
             total_loss += loss.item()
-            total_seg += loss_dict['seg_loss']
-            total_cluster += loss_dict['cluster_loss']
-            total_sym += loss_dict['symmetry_loss']
             
-            pbar.set_postfix({
-                'loss': f'{loss.item():.4f}',
-                'grad': f'{grad_norm:.2f}'
-            })
+            # Dynamic accumulation of all loss components
+            for k, v in loss_dict.items():
+                if k not in self.loss_accumulators:
+                    self.loss_accumulators[k] = 0.0
+                self.loss_accumulators[k] += v if isinstance(v, (int, float)) else v.item()
+            
+            # Update pbar
+            postfix = {'loss': f'{loss.item():.4f}'}
+            # Add other major losses to pbar if they exist
+            if 'main' in loss_dict:
+                postfix['main'] = f"{loss_dict['main']:.4f}"
+            pbar.set_postfix(postfix)
             
             # W&B Logging (Iterative)
             if self.config.USE_WANDB:
-                wandb.log({
-                    'batch/train_loss': loss.item(),
-                    'batch/seg_loss': loss_dict['seg_loss'],
-                    'batch/cluster_loss': loss_dict['cluster_loss'],
-                    'batch/symmetry_loss': loss_dict['symmetry_loss'],
-                    'batch/grad_norm': grad_norm,
-                    'epoch': epoch
-                })
+                log_dict = {'batch/train_loss': loss.item(), 'batch/grad_norm': grad_norm, 'epoch': epoch}
+                # Add all loss components
+                for k, v in loss_dict.items():
+                    log_dict[f'batch/{k}'] = v if isinstance(v, (int, float)) else v.item()
+                wandb.log(log_dict)
         
+        # Calculate averages
         avg_loss = total_loss / len(self.train_loader)
-        avg_seg = total_seg / len(self.train_loader)
-        avg_cluster = total_cluster / len(self.train_loader)
-        avg_sym = total_sym / len(self.train_loader)
+        avg_metrics = {k: v / len(self.train_loader) for k, v in self.loss_accumulators.items()}
         
-        return avg_loss, avg_seg, avg_cluster, avg_sym
+        return avg_loss, avg_metrics
     
     def validate(self, epoch):
         """Validate"""
@@ -199,8 +200,11 @@ class SymFormerTrainer:
         print("="*60)
         
         for epoch in range(1, num_epochs + 1):
+            # Reset accumulators for each epoch
+            self.loss_accumulators = {}
+            
             # Train
-            train_loss, seg_loss, cluster_loss, sym_loss = self.train_epoch(epoch)
+            train_loss, train_metrics = self.train_epoch(epoch)
             
             # Validate
             val_dice, val_loss = self.validate(epoch)
@@ -227,21 +231,21 @@ class SymFormerTrainer:
                 print(f"✓ Best model saved! Dice: {val_dice:.4f}")
             
             # Log
-            self.history.append({
+            history_dict = {
                 'epoch': epoch,
                 'train_loss': train_loss,
-                'seg_loss': seg_loss,
-                'cluster_loss': cluster_loss,
-                'symmetry_loss': sym_loss,
                 'val_loss': val_loss,
                 'val_dice': val_dice
-            })
+            }
+            # Add dynamic metrics to history
+            history_dict.update(train_metrics)
+            self.history.append(history_dict)
             
             print(f"Epoch {epoch}/{num_epochs} Summary:")
             print(f"  Train Loss: {train_loss:.4f}")
-            print(f"    - Seg: {seg_loss:.4f}")
-            print(f"    - Cluster: {cluster_loss:.4f}")
-            print(f"    - Symmetry: {sym_loss:.4f}")
+            # Print dynamic metrics
+            for k, v in train_metrics.items():
+                print(f"    - {k}: {v:.4f}")
             print(f"  Val Loss: {val_loss:.4f}")
             print(f"  Val Dice: {val_dice:.4f}")
             print(f"  Best Dice: {self.best_dice:.4f}")
@@ -249,17 +253,19 @@ class SymFormerTrainer:
             
             # W&B Logging (Epoch)
             if self.config.USE_WANDB:
-                wandb.log({
+                log_dict = {
                     'epoch': epoch,
                     'train/loss': train_loss,
-                    'train/seg_loss': seg_loss,
-                    'train/cluster_loss': cluster_loss,
-                    'train/symmetry_loss': sym_loss,
                     'val/loss': val_loss,
                     'val/dice': val_dice,
                     'val/best_dice': self.best_dice,
                     'learning_rate': self.optimizer.param_groups[0]['lr']
-                })
+                }
+                # Add dynamic train metrics
+                for k, v in train_metrics.items():
+                    log_dict[f'train/{k}'] = v
+                    
+                wandb.log(log_dict)
         
         print(f"\nTraining Complete! Best Dice: {self.best_dice:.4f}")
 
