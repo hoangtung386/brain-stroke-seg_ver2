@@ -49,17 +49,48 @@ pip install -r requirements.txt
 ```
 
 ### Universal Training
-Switching targets is as simple as changing a flag. The model adapts automatically.
+The training script supports universal dataset training and flexible hardware selection.
+
+#### 1. Device Selection (Hardware)
+The `--devices` flag controls which GPU(s) are used. If omitted, the model trains on CPU.
 
 ```powershell
-# Train for Brain Stroke (CT)
-python train.py --dataset cpaisd --devices 0
+# 🐢 CPU (Default)
+python train.py
 
-# Train for Brain Tumor (MRI)
-python train.py --dataset brats --devices 0
+# 🚀 GPU 0 (Single GPU)
+python train.py --devices 0
 
-# Train for Abdominal Trauma (CT)
-python train.py --dataset rsna --devices 0
+# 🚀 GPU 1 (Single GPU)
+python train.py --devices 1
+
+# ⚡ Dual GPU (Parallel Training)
+python train.py --devices 0,1
+```
+
+#### 2. Dataset Selection
+The `--dataset` flag switches the data loader and automatically updates the Weights & Biases project name.
+
+```bash 
+# Default CPU 
+python train.py --dataset cpaisd  # Brain Stroke (CT) - Default set in configs/config.py
+python train.py --dataset brats   # Brain Tumor (MRI)
+python train.py --dataset rsna    # Abdominal Trauma (CT)
+
+# GPU cuda 0 only
+python train.py --dataset cpaisd --devices 0    # W&B Project -> "OmniSym-dataset-cpaisd"
+python train.py --dataset brats --devices 0     # W&B Project -> "OmniSym-dataset-brats"
+python train.py --dataset rsna --devices 0      # W&B Project -> "OmniSym-dataset-rsna"
+
+# GPU cuda 1 only
+python train.py --dataset cpaisd --devices 1
+python train.py --dataset brats --devices 1
+python train.py --dataset rsna --devices 1
+
+# Simultaneously run both CUDA 0 and CUDA 1 GPUs.
+python train.py --dataset cpaisd --devices 0,1
+python train.py --dataset brats --devices 0,1
+python train.py --dataset rsna --devices 0,1
 ```
 
 ## 📚 Citation

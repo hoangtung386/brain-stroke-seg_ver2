@@ -96,7 +96,7 @@ class Config:
     
     # W&B settings
     USE_WANDB = True
-    WANDB_PROJECT = "Brain-segment-Stroke"
+    WANDB_PROJECT = "OmniSym-dataset-"
     WANDB_ENTITY = None
     WANDB_MODE = "online"
     

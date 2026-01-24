@@ -10,6 +10,8 @@ from models.losses import SymFormerLoss
 import argparse
 import os
 import wandb
+import csv
+
 
 # ============================================================================
 # INTEGRATION with Existing Code
@@ -241,6 +243,26 @@ class SymFormerTrainer:
             history_dict.update(train_metrics)
             self.history.append(history_dict)
             
+            # CSV Logging
+            log_file = os.path.join(self.config.OUTPUT_DIR, f"training_{self.config.DATASET_NAME}_log.csv")
+            file_exists = os.path.isfile(log_file)
+            
+            # If resetting at epoch 1 (optional, depends if we want to append or overwrite)
+            # Assuming we want to overwrite if starting from epoch 1, or append if resuming
+            # For simplicity, if epoch == 1, we overwrite
+            mode = 'w' if epoch == 1 else 'a'
+            
+            with open(log_file, mode, newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=history_dict.keys())
+                if epoch == 1:
+                    writer.writeheader()
+                    print(f"Created log file: {log_file}")
+                
+                # Verify header match for subsequent appends (if keys change, DictWriter might error or ignore)
+                # But for now assuming consistent keys
+                writer.writerow(history_dict)
+
+            
             print(f"Epoch {epoch}/{num_epochs} Summary:")
             print(f"  Train Loss: {train_loss:.4f}")
             # Print dynamic metrics
@@ -276,8 +298,8 @@ class SymFormerTrainer:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train SymFormer")
-    parser.add_argument('--devices', type=str, default='0', 
-                        help='Comma-separated GPU IDs (e.g. "0" or "0,1" or "0,1,2")')
+    parser.add_argument('--devices', type=str, default=None, 
+                        help='Comma-separated GPU IDs (e.g. "0" or "0,1"). Default: CPU')
     parser.add_argument('--dataset', type=str, default=None,
                         help='Dataset name (cpaisd, brats, rsna)')
     return parser.parse_args()
@@ -285,13 +307,19 @@ def parse_args():
 def main():
     """
     Usage:
-    python train.py --devices 0
-    python train.py --devices 0,1
+    python train.py                     # CPU
+    python train.py --devices 0         # GPU 0
+    python train.py --devices 1         # GPU 1
+    python train.py --devices 0,1       # Multi-GPU
     """
     args = parse_args()
     
-    # Set visible devices BEFORE verifying availability
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.devices
+    # Handle Device Selection
+    if args.devices:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.devices
+    else:
+        # Default to CPU if no devices specified
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
     
     from configs.config import Config
     from datasets import create_dataloaders
@@ -299,22 +327,26 @@ def main():
     # Setup directories
     Config.create_directories()
     
-    # Override dataset from args
+    # Override dataset from args and update WANDB Project
     if args.dataset:
         Config.DATASET_NAME = args.dataset
+        # Dynamically update WANDB project name
+        Config.WANDB_PROJECT = f"{Config.WANDB_PROJECT}{args.dataset}"
         print(f"Overriding dataset to: {args.dataset}")
+        print(f"W&B Project set to: {Config.WANDB_PROJECT}")
     
     # Initialize W&B
     if Config.USE_WANDB:
         wandb.init(
             project=Config.WANDB_PROJECT,
             config=Config.to_dict(),
-            name=f"SymFormerV2_{Config.DATASET_NAME}_gpu{args.devices}",
+            name=f"SymFormerV2_{Config.DATASET_NAME}_{'cpu' if not args.devices else 'gpu'+args.devices}",
             mode=Config.WANDB_MODE
         )
     
     # Configure Devices (Support Multi-GPU)
-    if torch.cuda.is_available():
+    # Check if we have visible devices consistent with args
+    if torch.cuda.is_available() and args.devices is not None:
         
         # NOTE: After setting CUDA_VISIBLE_DEVICES, the visible GPUs are re-indexed to 0, 1, ...
         # So 'device_ids' for DataParallel should always start from 0 up to count.
@@ -332,7 +364,7 @@ def main():
         device = torch.device('cpu')
         device_ids = []
         multi_gpu = False
-        print("CUDA not available. Using CPU.")
+        print("\nUsing CPU (No devices specified or CUDA unavailable).")
     
     # Data
     train_loader, val_loader = create_dataloaders(Config)
