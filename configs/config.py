@@ -87,8 +87,9 @@ class Config:
     
     # W&B settings
     USE_WANDB = True
-    WANDB_PROJECT = "Local-Global-Combined-Neural-Network-segment-Stroke"
+    WANDB_PROJECT = "Brain-segment-Stroke"
     WANDB_ENTITY = None
+    WANDB_MODE = "online"
     
     # Scheduler parameters
     SCHEDULER_T0 = 10
