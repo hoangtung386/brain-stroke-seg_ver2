@@ -1,0 +1,266 @@
+"""
+Improved Alignment Loss for SEAN Architecture - FIXED for AMP
+
+Fixes:
+1. Proper dtype handling for mixed precision training
+2. Sobel filters match input tensor dtype
+3. Edge detection compatible with autocast
+"""
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class ImprovedAlignmentLoss(nn.Module):
+    """
+    Improved alignment loss with multiple components:
+    1. Symmetry Loss: Penalizes asymmetry after alignment
+    2. Regularization Loss: Prevents extreme transformations
+    3. Edge Consistency Loss: Ensures edges are preserved
+    
+    FIXED: Proper dtype handling for AMP (mixed precision)
+    """
+    
+    def __init__(self, symmetry_weight=1.0, reg_weight=0.1, edge_weight=0.5):
+        super(ImprovedAlignmentLoss, self).__init__()
+        
+        self.symmetry_weight = symmetry_weight
+        self.reg_weight = reg_weight
+        self.edge_weight = edge_weight
+        
+        # Sobel filters for edge detection - will be cast to input dtype
+        sobel_x = torch.FloatTensor([
+            [-1, 0, 1],
+            [-2, 0, 2],
+            [-1, 0, 1]
+        ]).unsqueeze(0).unsqueeze(0)
+        
+        sobel_y = torch.FloatTensor([
+            [-1, -2, -1],
+            [0, 0, 0],
+            [1, 2, 1]
+        ]).unsqueeze(0).unsqueeze(0)
+        
+        self.register_buffer('sobel_x', sobel_x)
+        self.register_buffer('sobel_y', sobel_y)
+    
+    def compute_edges(self, x):
+        """
+        Compute edge map using Sobel filters
+        FIXED: Cast Sobel filters to match input dtype (for AMP)
+        """
+        # Cast Sobel filters to match input dtype and device
+        sobel_x = self.sobel_x.to(dtype=x.dtype, device=x.device)
+        sobel_y = self.sobel_y.to(dtype=x.dtype, device=x.device)
+        
+        edge_x = F.conv2d(x, sobel_x, padding=1)
+        edge_y = F.conv2d(x, sobel_y, padding=1)
+        edges = torch.sqrt(edge_x**2 + edge_y**2 + 1e-8)  # Add epsilon for stability
+        return edges
+    
+    def symmetry_loss(self, aligned_slice):
+        """
+        Compute symmetry loss with proper scaling
+        
+        Args:
+            aligned_slice: (B, 1, H, W) - Aligned image
+        
+        Returns:
+            Symmetry loss value
+        """
+        # Normalize inputs
+        if aligned_slice.numel() > 0:
+            aligned_slice_norm = (aligned_slice - aligned_slice.mean()) / (aligned_slice.std() + 1e-8)
+        else:
+            aligned_slice_norm = aligned_slice
+
+        flipped = torch.flip(aligned_slice_norm, dims=[-1])
+        
+        # Use cosine similarity (bounded [-1, 1])
+        # Flatten spatial dims: (B, C, H, W) -> (B, C*H*W)
+        cos_sim = F.cosine_similarity(
+            aligned_slice_norm.flatten(1),
+            flipped.flatten(1),
+            dim=1
+        ).mean()
+        
+        sym_loss = 1 - cos_sim  # [0, 2], stable
+        
+        return sym_loss
+    
+    def regularization_loss(self, alignment_params):
+        """
+        Regularization to prevent extreme transformations
+        
+        Args:
+            alignment_params: (B, 3) - [angle, shift_x, shift_y]
+        
+        Returns:
+            Regularization loss
+        """
+        # Penalize large angles (should be small for brain CT)
+        angle_loss = torch.mean(alignment_params[:, 0]**2)
+        
+        # Penalize large shifts
+        shift_loss = torch.mean(alignment_params[:, 1]**2 + alignment_params[:, 2]**2)
+        
+        # Combined regularization
+        reg_loss = angle_loss + shift_loss
+        
+        return reg_loss
+    
+    def edge_consistency_loss(self, aligned_slice, original_slice):
+        """
+        Ensure edges are preserved after alignment
+        FIXED: Proper dtype handling
+        
+        Args:
+            aligned_slice: (B, 1, H, W) - Aligned image
+            original_slice: (B, 1, H, W) - Original image
+        
+        Returns:
+            Edge consistency loss
+        """
+        # Compute edges - sobel filters will be cast automatically
+        edges_aligned = self.compute_edges(aligned_slice)
+        edges_original = self.compute_edges(original_slice)
+        
+        # Ensure edges are similar
+        edge_loss = F.l1_loss(edges_aligned, edges_original)
+        
+        return edge_loss
+    
+    def forward(self, aligned_slices, alignment_params_list, original_slices):
+        """
+        Compute total alignment loss
+        
+        Args:
+            aligned_slices: List of (B, 1, H, W) aligned slices
+            alignment_params_list: List of (B, 3) transformation parameters
+            original_slices: List of (B, 1, H, W) original slices
+        
+        Returns:
+            total_loss, loss_dict
+        """
+        total_symmetry = 0.0
+        total_regularization = 0.0
+        total_edge_consistency = 0.0
+        
+        num_slices = len(aligned_slices)
+        
+        for aligned, params, original in zip(aligned_slices, alignment_params_list, original_slices):
+            # 1. Symmetry loss
+            sym_loss = self.symmetry_loss(aligned)
+            total_symmetry += sym_loss
+            
+            # 2. Regularization loss
+            reg_loss = self.regularization_loss(params)
+            total_regularization += reg_loss
+            
+            # 3. Edge consistency loss
+            edge_loss = self.edge_consistency_loss(aligned, original)
+            total_edge_consistency += edge_loss
+        
+        # Average over slices
+        avg_symmetry = total_symmetry / num_slices
+        avg_regularization = total_regularization / num_slices
+        avg_edge_consistency = total_edge_consistency / num_slices
+        
+        # Weighted combination
+        total_loss = (
+            self.symmetry_weight * avg_symmetry +
+            self.reg_weight * avg_regularization +
+            self.edge_weight * avg_edge_consistency
+        )
+        
+        loss_dict = {
+            'symmetry': avg_symmetry.item() if isinstance(avg_symmetry, torch.Tensor) else avg_symmetry,
+            'regularization': avg_regularization.item() if isinstance(avg_regularization, torch.Tensor) else avg_regularization,
+            'edge_consistency': avg_edge_consistency.item() if isinstance(avg_edge_consistency, torch.Tensor) else avg_edge_consistency,
+            'total_alignment': total_loss.item() if isinstance(total_loss, torch.Tensor) else total_loss
+        }
+        
+        return total_loss, loss_dict
+
+
+class ImprovedCombinedLoss(nn.Module):
+    """
+    Improved combined loss for LCNN with better alignment loss
+    FIXED for AMP compatibility
+    """
+    
+    def __init__(self, num_classes=2, dice_weight=0.5, ce_weight=0.5, 
+                 alignment_weight=0.3, use_alignment=True, class_weights=None):
+        super(ImprovedCombinedLoss, self).__init__()
+        
+        self.dice_weight = dice_weight
+        self.ce_weight = ce_weight
+        self.alignment_weight = alignment_weight
+        self.use_alignment = use_alignment
+        
+        # Dice Loss (Weighted if supported, but typically Dice handles overlap well)
+        from monai.losses import DiceLoss
+        self.dice_loss = DiceLoss(
+            include_background=True,
+            to_onehot_y=True,
+            softmax=True
+        )
+        
+        # Cross Entropy Loss (Weighted for Class Imbalance)
+        self.ce_loss = nn.CrossEntropyLoss(weight=class_weights)
+        
+        # Alignment Loss (Improved & Fixed)
+        self.alignment_loss_fn = ImprovedAlignmentLoss(
+            symmetry_weight=1.0,
+            reg_weight=0.1,
+            edge_weight=0.5
+        )
+    
+    def forward(self, outputs, targets, aligned_slices=None, 
+                alignment_params=None, original_slices=None):
+        """
+        Compute total loss
+        
+        Args:
+            outputs: (B, num_classes, H, W) - Model predictions
+            targets: (B, H, W) or (B, 1, H, W) - Ground truth
+            aligned_slices: List of aligned slices
+            alignment_params: List of transformation parameters
+            original_slices: List of original slices
+        
+        Returns:
+            total_loss, dice_ce_loss, alignment_loss, alignment_details
+        """
+        # Main segmentation loss
+        # Targets for Dice: (B, 1, H, W)
+        if targets.ndim == 3:
+           targets = targets.unsqueeze(1)
+           
+        dice_l = self.dice_loss(outputs, targets)
+        
+        # Targets for CE: (B, H, W) - Long Tensor
+        if targets.ndim == 4:
+           targets_ce = targets.squeeze(1).long()
+        else:
+           targets_ce = targets.long()
+           
+        ce_l = self.ce_loss(outputs, targets_ce)
+        
+        dice_ce_loss = self.dice_weight * dice_l + self.ce_weight * ce_l
+        
+        total_loss = dice_ce_loss
+        alignment_loss = torch.tensor(0.0, device=outputs.device, dtype=outputs.dtype)
+        alignment_details = {}
+        
+        # Add improved alignment loss if slices are provided
+        if (self.use_alignment and aligned_slices is not None and 
+            alignment_params is not None and original_slices is not None):
+            
+            alignment_loss, alignment_details = self.alignment_loss_fn(
+                aligned_slices, alignment_params, original_slices
+            )
+            
+            total_loss = total_loss + self.alignment_weight * alignment_loss
+        
+        return total_loss, dice_ce_loss, alignment_loss, alignment_details
+        
