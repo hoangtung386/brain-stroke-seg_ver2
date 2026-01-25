@@ -305,112 +305,123 @@ def parse_args():
     return parser.parse_args()
 
 def main():
-    """
-    Usage:
-    python train.py                     # CPU
-    python train.py --devices 0         # GPU 0
-    python train.py --devices 1         # GPU 1
-    python train.py --devices 0,1       # Multi-GPU
-    """
     args = parse_args()
     
-    # Handle Device Selection
+    # 1. SET CUDA_VISIBLE_DEVICES BEFORE IMPORTING TORCH
     if args.devices:
         os.environ["CUDA_VISIBLE_DEVICES"] = args.devices
+        print(f"🎯 Setting CUDA_VISIBLE_DEVICES={args.devices}")
     else:
-        # Default to CPU if no devices specified
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
+        print("🎯 Using CPU (no GPUs specified)")
     
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    
-    from configs.config import Config, get_config
-    
-    # 1. Determine Dataset Name first (default to cpaisd if not specified)
-    dataset_name = args.dataset if args.dataset else 'cpaisd'
-    
-    # 2. Get Specific Configuration
-    Config = get_config(dataset_name)
-    print(f"Loaded Configuration for: {Config.DATASET_NAME}")
-    
+    # 2. IMPORT AFTER SETTING ENV VAR
+    import torch
+    import torch.nn as nn
+    from configs.config import get_config  # ← CORRECT
     from datasets import create_dataloaders
     
-    # Setup directories
-    Config.create_directories()
+    # 3. GET CORRECT CONFIG
+    dataset_name = args.dataset if args.dataset else 'cpaisd'
+    ConfigClass = get_config(dataset_name)  # ← RENAME VARIABLE
     
-    # Override dataset from args and update WANDB Project
-    if args.dataset:
-        Config.DATASET_NAME = args.dataset
-        # Dynamically update WANDB project name
-        Config.WANDB_PROJECT = f"{Config.WANDB_PROJECT}{args.dataset}"
-        print(f"Overriding dataset to: {args.dataset}")
-        print(f"W&B Project set to: {Config.WANDB_PROJECT}")
+    print(f"\n{'='*60}")
+    print(f"📦 DATASET: {ConfigClass.DATASET_NAME}")
+    print(f"🔧 CONFIG CLASS: {ConfigClass.__name__}")
+    print(f"{'='*60}")
     
-    # Initialize W&B
-    if Config.USE_WANDB:
+    # 4. SETUP DIRECTORIES
+    ConfigClass.create_directories()
+    
+    # 5. UPDATE WANDB PROJECT NAME
+    wandb_project = f"{ConfigClass.WANDB_PROJECT}{dataset_name}"
+    
+    # 6. INIT WANDB
+    if ConfigClass.USE_WANDB:
         wandb.init(
-            project=Config.WANDB_PROJECT,
-            config=Config.to_dict(),
-            name=f"SymFormerV2_{Config.DATASET_NAME}_{'cpu' if not args.devices else 'gpu'+args.devices}",
-            mode=Config.WANDB_MODE
+            project=wandb_project,
+            config=ConfigClass.to_dict(),
+            name=f"SymFormer_{dataset_name}_{'cpu' if not args.devices else 'gpu'+args.devices.replace(',','_')}",
+            mode=ConfigClass.WANDB_MODE
         )
     
-    # Configure Devices (Support Multi-GPU)
-    # Check if we have visible devices consistent with args
-    if torch.cuda.is_available() and args.devices is not None:
-        
-        # NOTE: After setting CUDA_VISIBLE_DEVICES, the visible GPUs are re-indexed to 0, 1, ...
-        # So 'device_ids' for DataParallel should always start from 0 up to count.
-        
+    # 7. DEVICE SETUP AFTER ENV VAR SET
+    if torch.cuda.is_available():
         device_count = torch.cuda.device_count()
-        device_ids = list(range(device_count)) # [0, 1, ...] relative to visible devices
-        device = torch.device('cuda:0')
-        multi_gpu = device_count > 1
         
-        print(f"\nCUDA Enabled.")
-        print(f"Requested GPUs: {args.devices}")
-        print(f"Visible Device Count: {device_count}")
-        print(f"Using Devices: {device_ids}")
+        if device_count == 0:
+            print("⚠️ CUDA available but no visible devices!")
+            device = torch.device('cpu')
+            device_ids = []
+            multi_gpu = False
+        else:
+            # After setting CUDA_VISIBLE_DEVICES:
+            # - Physical GPU [1] → cuda:0 in PyTorch
+            # - Physical GPU [0,1] → cuda:0, cuda:1
+            device_ids = list(range(device_count))
+            device = torch.device('cuda:0')
+            multi_gpu = device_count > 1
+            
+            print(f"\n🚀 GPU Configuration:")
+            print(f"   Requested: --devices {args.devices}")
+            print(f"   Visible Count: {device_count}")
+            print(f"   Device IDs: {device_ids}")
+            print(f"   Primary Device: {device}")
+            print(f"   Multi-GPU: {multi_gpu}")
+            
+            # VALIDATE
+            for i in device_ids:
+                print(f"   ✓ cuda:{i} = {torch.cuda.get_device_name(i)}")
     else:
         device = torch.device('cpu')
         device_ids = []
         multi_gpu = False
-        print("\nUsing CPU (No devices specified or CUDA unavailable).")
+        print("\n💻 Using CPU")
     
-    # Data
-    train_loader, val_loader = create_dataloaders(Config)
+    # 8. CREATE DATALOADERS
+    print(f"\n📂 Loading dataset from: {ConfigClass.DATA_PATHS.get(dataset_name, 'NOT FOUND')}")
+    train_loader, val_loader = create_dataloaders(ConfigClass)
     
-    # Model (NEW!)
+    print(f"✓ Train samples: {len(train_loader.dataset)}")
+    print(f"✓ Val samples: {len(val_loader.dataset)}")
+    
+    # 9. CREATE MODEL
     from models.symformer import SymFormer
     model = SymFormer(
-        in_channels=Config.NUM_CHANNELS,
-        num_classes=Config.NUM_CLASSES,
-        T=Config.T,
-        input_size=Config.IMAGE_SIZE
+        in_channels=ConfigClass.NUM_CHANNELS,
+        num_classes=ConfigClass.NUM_CLASSES,
+        T=ConfigClass.T,
+        input_size=ConfigClass.IMAGE_SIZE
     )
     
-    print(f"\nSymFormer Architecture:")
-    print(f"  Parameters: {sum(p.numel() for p in model.parameters())/1e6:.2f}M")
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"\n🧠 Model: SymFormer")
+    print(f"   Parameters: {total_params/1e6:.2f}M")
+    print(f"   Classes: {ConfigClass.NUM_CLASSES}")
+    print(f"   Input Size: {ConfigClass.IMAGE_SIZE}")
     
-    # Apply DataParallel
+    # 10. APPLY DATAPARALLEL
     if multi_gpu:
-        print(f"  Enabling DataParallel on devices: {device_ids}")
+        print(f"\n⚡ Enabling DataParallel on {device_ids}")
         model = nn.DataParallel(model, device_ids=device_ids)
     
     model = model.to(device)
     
-    # Trainer
+    # 11. CREATE TRAINER
     trainer = SymFormerTrainer(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
-        config=Config,
+        config=ConfigClass,  # ← PASS ConfigClass
         device=device,
         multi_gpu=multi_gpu
     )
     
-    # Train
-    trainer.train(num_epochs=Config.NUM_EPOCHS)
-
+    # 12. TRAIN
+    print(f"\n{'='*60}")
+    print(f"🏋️ STARTING TRAINING")
+    print(f"{'='*60}")
+    trainer.train(num_epochs=ConfigClass.NUM_EPOCHS)
 
 if __name__ == "__main__":
     main()

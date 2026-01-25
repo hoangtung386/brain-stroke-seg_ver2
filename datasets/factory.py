@@ -42,10 +42,15 @@ def create_dataloaders(config):
                 dataset_root = p
                 break
     
+    # VALIDATE DATASET PATH
     if dataset_root is None or not os.path.exists(dataset_root):
-        # Only error if we are strictly trying to run that dataset
-        # For now, print warning if not found
-        print(f"WARNING: Dataset root not found for {dataset_name}: {dataset_root}")
+        raise FileNotFoundError(
+            f"❌ Dataset root not found for '{dataset_name}'!\n"
+            f"   Expected: {dataset_root}\n"
+            f"   Please check configs/config.py DATA_PATHS"
+        )
+    
+    print(f"✓ Dataset root: {dataset_root}")
         # raise FileNotFoundError(f"Dataset root not found for {dataset_name}")
 
     DatasetClass = get_dataset_class(dataset_name)
