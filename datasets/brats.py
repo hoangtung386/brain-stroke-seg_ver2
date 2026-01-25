@@ -174,13 +174,9 @@ class BraTSDataset(BaseDataset):
             mask_slice = img_seg.dataobj[..., slice_idx].astype(np.int64)
             
             # 4. Map Labels
-            # BraTS: 0=bg, 1=NCR, 2=Edema, 3=ET
-            # Target: 0=bg, 1=Core(NCR+ET), 2=Penumbra(Edema)
-            
-            new_mask = np.zeros_like(mask_slice)
-            new_mask[mask_slice == 1] = 1 # NCR -> Core
-            new_mask[mask_slice == 3] = 1 # ET -> Core
-            new_mask[mask_slice == 2] = 2 # Edema -> Penumbra
+            # Return native BraTS labels: 0=bg, 1=NCR, 2=Edema, 3=ET
+            # We do NOT map to Core/Penumbra anymore.
+            new_mask = mask_slice # Keep original classes
         else:
             # Dummy mask for validation/inference
             new_mask = np.zeros(images.shape[1:], dtype=np.int64) 

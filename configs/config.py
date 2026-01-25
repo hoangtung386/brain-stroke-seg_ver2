@@ -13,7 +13,7 @@ class Config:
     
     DATA_PATHS = {
         'cpaisd': 'dataset_APIS/dataset',
-        'brats': 'datasets/BraTS',
+        'brats': 'Dataset_BraTs', # Corrected path
         'rsna': 'datasets/RSNA'
     }
     
@@ -168,6 +168,7 @@ class CPAISDConfig(Config):
     """Configuration for Stroke (CT)"""
     DATASET_NAME = 'cpaisd'
     NUM_CLASSES = 3      # 0=bg, 1=core, 2=penumbra
+    IMAGE_SIZE = (512, 512) # CT size
     USE_HU_WINDOW = True # CT specific
     
     # Weights optimized for Stroke
@@ -177,7 +178,9 @@ class CPAISDConfig(Config):
 class BraTSConfig(Config):
     """Configuration for Brain Tumor (MRI)"""
     DATASET_NAME = 'brats'
-    NUM_CLASSES = 3      # 0=bg, 1=Core(NCR+ET), 2=Penumbra(Edema)
+    NUM_CLASSES = 4      
+    IMAGE_SIZE = (240, 240) # BraTS Native Resolution
+    
     USE_HU_WINDOW = False # MRI does not use HU
     
     # MRI usually needs normalization per volume (handled in loader)
