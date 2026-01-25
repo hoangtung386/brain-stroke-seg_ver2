@@ -321,7 +321,17 @@ def main():
         # Default to CPU if no devices specified
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
     
-    from configs.config import Config
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    
+    from configs.config import Config, get_config
+    
+    # 1. Determine Dataset Name first (default to cpaisd if not specified)
+    dataset_name = args.dataset if args.dataset else 'cpaisd'
+    
+    # 2. Get Specific Configuration
+    Config = get_config(dataset_name)
+    print(f"Loaded Configuration for: {Config.DATASET_NAME}")
+    
     from datasets import create_dataloaders
     
     # Setup directories

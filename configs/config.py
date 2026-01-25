@@ -159,31 +159,50 @@ class Config:
         print("="*60 + "\n")
 
 
-# Configuration profiles for different use cases
-class FastDebugConfig(Config):
-    """Fast debug configuration for quick testing"""
-    BATCH_SIZE = 4
-    NUM_EPOCHS = 5
-    NUM_WORKERS = 2
-    DEBUG_MODE = True
-    DETECT_ANOMALY = True
-    USE_WANDB = True
 
+# ============================================================================
+# DATASET-SPECIFIC CONFIGURATIONS
+# ============================================================================
 
-class ConservativeConfig(Config):
-    """Ultra-conservative config for maximum stability"""
-    BATCH_SIZE = 4
-    LEARNING_RATE = 5e-5
-    GRAD_CLIP_NORM = 0.25
-    ALIGNMENT_WEIGHT = 0.001
-    USE_AMP = False
+class CPAISDConfig(Config):
+    """Configuration for Stroke (CT)"""
+    DATASET_NAME = 'cpaisd'
+    NUM_CLASSES = 3      # 0=bg, 1=core, 2=penumbra
+    USE_HU_WINDOW = True # CT specific
+    
+    # Weights optimized for Stroke
+    DICE_WEIGHT = 0.7
+    CE_WEIGHT = 0.3
+    
+class BraTSConfig(Config):
+    """Configuration for Brain Tumor (MRI)"""
+    DATASET_NAME = 'brats'
+    NUM_CLASSES = 3      # 0=bg, 1=Core(NCR+ET), 2=Penumbra(Edema)
+    USE_HU_WINDOW = False # MRI does not use HU
+    
+    # MRI usually needs normalization per volume (handled in loader)
+    MEAN = [0.0] # Not used if loader does internal norm
+    STD = [1.0]
+    
+    # Class weights might differ
+    # Core is often smaller than Edema
+    DICE_WEIGHT = 0.5
+    FOCAL_WEIGHT = 0.5 
 
+class RSNAConfig(Config):
+    """Configuration for Abdominal Trauma (CT)"""
+    DATASET_NAME = 'rsna'
+    NUM_CLASSES = 2 # Placeholder: 0=bg, 1=injury
+    USE_HU_WINDOW = True # CT
+    
+def get_config(dataset_name):
+    """Factory to get config by name"""
+    if dataset_name == 'cpaisd':
+        return CPAISDConfig
+    elif dataset_name == 'brats':
+        return BraTSConfig
+    elif dataset_name == 'rsna':
+        return RSNAConfig
+    else:
+        return Config # Default
 
-class AggressiveConfig(Config):
-    """Aggressive config for faster training (use with caution)"""
-    BATCH_SIZE = 8
-    LEARNING_RATE = 5e-4
-    NUM_WORKERS = 8
-    GRAD_CLIP_NORM = 2.0
-    ALIGNMENT_WEIGHT = 0.05
-    USE_AMP = True

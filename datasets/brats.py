@@ -23,11 +23,6 @@ class BraTSDataset(BaseDataset):
         self.dataset_root = Path(dataset_root)
         
         # Adjust path for Validation vs Training folder names if needed
-        # User provided: 
-        # Train: ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData
-        # Val: ASNR-MICCAI-BraTS2023-GLI-Challenge-ValidationData
-        
-        # Simple heuristic to find the right folder if the root is just 'Dataset_BraTs'
         if split == 'train':
             if (self.dataset_root / 'ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData').exists():
                 self.data_dir = self.dataset_root / 'ASNR-MICCAI-BraTS2023-GLI-Challenge-TrainingData'
@@ -37,20 +32,24 @@ class BraTSDataset(BaseDataset):
             if (self.dataset_root / 'ASNR-MICCAI-BraTS2023-GLI-Challenge-ValidationData').exists():
                 self.data_dir = self.dataset_root / 'ASNR-MICCAI-BraTS2023-GLI-Challenge-ValidationData'
             else:
-                 # If validation folder missing, fallback to train or specific val path if provided
                  self.data_dir = self.dataset_root 
         
         self.samples = self._build_index()
+        
+        # Simple cache for volumes to avoid repetitive IO
+        # Stores: path -> volume array (normalized)
+        self.volume_cache = {} 
+        self.max_cache_size = 2 # Keep 2 volumes in memory (current + next usually)
         
         print(f"\n{split.upper()} Dataset (BraTS):")
         print(f"  Root: {self.data_dir}")
         print(f"  Total slices: {len(self.samples)}")
         print(f"  Adjacent slices (T): {T}")
+        print(f"  Normalization: Z-Score (Per-Volume)")
         
     def _build_index(self):
         """
         Build index of reliable slices.
-        We only index slices that contain some brain tissue to avoid empty training batches.
         """
         samples = []
         
@@ -67,45 +66,85 @@ class BraTSDataset(BaseDataset):
             flair_path = study_path / f"{study_id}-t2f.nii.gz"
             seg_path = study_path / f"{study_id}-seg.nii.gz"
             
-            if not flair_path.exists() or not seg_path.exists():
+            # Check existence
+            if not flair_path.exists():
+                continue
+            
+            # For Training, we MUST have labels
+            # For Validation/Test, it's okay to miss regular labels (we returned dummy)
+            if self.split == 'train' and not seg_path.exists():
                 continue
                 
-            # We delay loading the heavy NIfTI volume. 
-            # But we need basic info (num_slices).
-            # Optimization: Load header only.
             try:
+                # Optimized header read
                 img_proxy = nib.load(flair_path)
-                num_slices = img_proxy.shape[2] # (H, W, D)
+                num_slices = img_proxy.shape[2] 
                 
-                # Add slices
-                # To reduce index size and empty slices, we might want to skip first/last 20 slices
-                # BraTS typically has ~155 slices, margins are usually empty background.
-                margin = 15
+                margin = 20 # Avoid empty edges
                 for i in range(margin, num_slices - margin):
                     samples.append({
                         'study_id': study_id,
                         'slice_idx': i,
                         'flair_path': str(flair_path),
                         'seg_path': str(seg_path),
-                        'num_slices': num_slices,
-                        'path': study_path
+                        'num_slices': num_slices
                     })
             except Exception as e:
                 print(f"Error reading header for {study_id}: {e}")
                 
         return samples
 
-    def _load_volume_slice(self, path, slice_idx):
-        """Load a specific slice from NIfTI volume"""
-        # Note: Loading entire NIfTI for 1 slice is inefficient.
-        # Ideally, we cache volumes or convert to .npy/.npz ahead of time.
-        # For 'on-the-fly' loading, this is the trade-off.
-        
+    def _load_volume_cached(self, path):
+        """
+        Load and normalize entire volume with caching.
+        Performs Z-Score normalization per volume.
+        """
+        if path in self.volume_cache:
+            return self.volume_cache[path]
+            
+        # Manage cache size
+        if len(self.volume_cache) >= self.max_cache_size:
+            # Remove a random key (or oldest if ordered, python dicts are ordered by insertion now)
+            # Efficient FIFO removal
+            first_key = next(iter(self.volume_cache))
+            del self.volume_cache[first_key]
+            
+        # Load Volume
         img = nib.load(path)
-        # Slicing creates a proxy, data_obj gets the data
-        # shape is (H, W, D), we want indices corresponding to slice_idx
-        slice_data = img.dataobj[..., slice_idx] 
-        return np.array(slice_data).astype(np.float32)
+        data = img.get_fdata().astype(np.float32)
+        
+        # Z-Score Normalization
+        brain_mask = data > 0
+        if brain_mask.any():
+            brain_voxels = data[brain_mask]
+            mean = brain_voxels.mean()
+            std = brain_voxels.std()
+            
+            # Z-Score
+            data_norm = (data - mean) / (std + 1e-8)
+            
+            # Robust scaling (Percentile clipping)
+            # Clip between 0.5% and 99.5% to remove outliers
+            p05 = np.percentile(brain_voxels, 0.5)
+            # Reconstruct approximately from z-score
+            # or just clip the z-score itself.
+            # Clipping Z-score to [-3, 3] is also common.
+            # Let's clip to [p05, p995] of original values transformed
+            
+            # Simplified robust Min-Max on Z-Scored data
+            # Typically range is approx [-3, 3]
+            data_norm = np.clip(data_norm, -3.0, 3.0)
+            
+            # Scale to [0, 1] for model consistency
+            data_norm = (data_norm - data_norm.min()) / (data_norm.max() - data_norm.min() + 1e-8)
+            
+            data = data_norm
+        else:
+            # Empty volume (unlikely)
+            data = data / (data.max() + 1e-8)
+            
+        self.volume_cache[path] = data
+        return data
 
     def __len__(self):
         return len(self.samples)
@@ -117,35 +156,35 @@ class BraTSDataset(BaseDataset):
         flair_path = sample['flair_path']
         seg_path = sample['seg_path']
         
-        # 1. Load Input Images (2T+1 slices)
+        # 1. Load Normalized Volume (Cached)
+        flair_volume = self._load_volume_cached(flair_path)
+        
+        # 2. Extract Input Slices (2T+1)
         images = []
         for offset in range(-self.T, self.T + 1):
             s_idx = max(0, min(num_slices - 1, slice_idx + offset))
-            
-            # Load slice
-            img_slice = self._load_volume_slice(flair_path, s_idx)
-            
-            # Normalization (Simple Min-Max per slice or global Z-score)
-            # Global Z-score is better, but requires volume stats. 
-            # For simplicity and robustness per slice: Min-Max
-            if img_slice.max() > 0:
-                img_slice = (img_slice - img_slice.min()) / (img_slice.max() - img_slice.min())
-            
-            images.append(img_slice)
+            images.append(flair_volume[..., s_idx])
             
         images = np.stack(images, axis=0) # (2T+1, H, W)
         
-        # 2. Load Mask (Center slice)
-        mask_slice = self._load_volume_slice(seg_path, slice_idx).astype(np.int64)
-        
-        # 3. Map Labels
-        # BraTS: 0=bg, 1=NCR, 2=Edema, 3=ET
-        # Target: 0=bg, 1=Core(NCR+ET), 2=Penumbra(Edema)
-        
-        new_mask = np.zeros_like(mask_slice)
-        new_mask[mask_slice == 1] = 1 # NCR -> Core
-        new_mask[mask_slice == 3] = 1 # ET -> Core
-        new_mask[mask_slice == 2] = 2 # Edema -> Penumbra
+        # 3. Load Mask (Center slice only)
+        # Handle missing segregation (for Validation/Test sets)
+        if os.path.exists(seg_path):
+            img_seg = nib.load(seg_path)
+            mask_slice = img_seg.dataobj[..., slice_idx].astype(np.int64)
+            
+            # 4. Map Labels
+            # BraTS: 0=bg, 1=NCR, 2=Edema, 3=ET
+            # Target: 0=bg, 1=Core(NCR+ET), 2=Penumbra(Edema)
+            
+            new_mask = np.zeros_like(mask_slice)
+            new_mask[mask_slice == 1] = 1 # NCR -> Core
+            new_mask[mask_slice == 3] = 1 # ET -> Core
+            new_mask[mask_slice == 2] = 2 # Edema -> Penumbra
+        else:
+            # Dummy mask for validation/inference
+            new_mask = np.zeros(images.shape[1:], dtype=np.int64) 
+
         
         # Convert to tensor
         images = torch.from_numpy(images).float()
@@ -155,7 +194,6 @@ class BraTSDataset(BaseDataset):
         metadata = {
             'study_id': sample['study_id'],
             'slice_index': slice_idx,
-            # Dummy clinical data (BraTS doesn't usually provide NIHSS/Time)
             'nihss': 10.0,
             'age': 60.0,
             'dsa': 0,
