@@ -74,10 +74,10 @@ class SymmetryAwareBottleneck(nn.Module):
         """
         B, C, D, H, W = x.shape
         
-        # Split left/right hemispheres
+        # Split left/right hemispheres with equal widths
         mid_w = W // 2
         x_left = x[..., :mid_w]
-        x_right = x[..., mid_w:]
+        x_right = x[..., mid_w:mid_w*2]  # Ensure same width as left
         
         # Process each hemisphere
         f_left = self.left_branch(x_left)
@@ -88,6 +88,12 @@ class SymmetryAwareBottleneck(nn.Module):
         
         # Concatenate and fuse
         f_concat = torch.cat([f_left_attended, f_right_attended], dim=-1)
+        
+        # If original W was odd, pad to restore original width
+        if f_concat.shape[-1] < W:
+            pad_width = W - f_concat.shape[-1]
+            f_concat = F.pad(f_concat, (0, pad_width), mode='constant', value=0)
+        
         fused = self.fusion(f_concat)
         
         return fused, asym_map
@@ -127,11 +133,14 @@ class CrossHemisphereAttention(nn.Module):
         k_r = self.k_right(right_flipped)
         v_r = self.v_right(right_flipped)
         
-        # Reshape for multi-head attention
+        # Get actual spatial dimensions from tensor shape
         B, C, D, H, W = q_l.shape
-        q_l = q_l.view(B, self.num_heads, self.head_dim, D*H*W).transpose(-2, -1)
-        k_r = k_r.view(B, self.num_heads, self.head_dim, D*H*W)
-        v_r = v_r.view(B, self.num_heads, self.head_dim, D*H*W).transpose(-2, -1)
+        spatial_size = D * H * W  # Use actual dimensions, not assumed
+        
+        # Reshape for multi-head attention
+        q_l = q_l.view(B, self.num_heads, self.head_dim, spatial_size).transpose(-2, -1)
+        k_r = k_r.view(B, self.num_heads, self.head_dim, spatial_size)
+        v_r = v_r.view(B, self.num_heads, self.head_dim, spatial_size).transpose(-2, -1)
         
         # Attention
         attn_l = torch.softmax(q_l @ k_r * self.scale, dim=-1)
@@ -142,9 +151,10 @@ class CrossHemisphereAttention(nn.Module):
         k_l = self.k_left(left)
         v_l = self.v_left(left)
         
-        q_r = q_r.view(B, self.num_heads, self.head_dim, D*H*W).transpose(-2, -1)
-        k_l = k_l.view(B, self.num_heads, self.head_dim, D*H*W)
-        v_l = v_l.view(B, self.num_heads, self.head_dim, D*H*W).transpose(-2, -1)
+        # Use same spatial_size (already computed from left)
+        q_r = q_r.view(B, self.num_heads, self.head_dim, spatial_size).transpose(-2, -1)
+        k_l = k_l.view(B, self.num_heads, self.head_dim, spatial_size)
+        v_l = v_l.view(B, self.num_heads, self.head_dim, spatial_size).transpose(-2, -1)
         
         attn_r = torch.softmax(q_r @ k_l * self.scale, dim=-1)
         out_r = (attn_r @ v_l).transpose(-2, -1).reshape(B, C, D, H, W)
