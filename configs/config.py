@@ -38,7 +38,7 @@ class Config:
     WINDOW_WIDTH = 85
     
     # Batch size (optimized for RTX 3090 24GB VRAM)
-    BATCH_SIZE = 16  # Increased from 4 for better GPU utilization
+    BATCH_SIZE = 20  # Increased from 4 for better GPU utilization
     NUM_EPOCHS = 150
     LEARNING_RATE = 1e-5
     
