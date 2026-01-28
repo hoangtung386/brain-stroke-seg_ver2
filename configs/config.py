@@ -42,7 +42,7 @@ class Config:
     NEGATIVE_SAMPLE_RATIO = 0.2     # Keep 20% of empty slices as negative examples
     
     # Batch size (optimized for RTX 3090 24GB VRAM)
-    BATCH_SIZE = 20  # Increased from 4 for better GPU utilization
+    BATCH_SIZE = 4  # Increased from 4 for better GPU utilization
     NUM_EPOCHS = 150
     LEARNING_RATE = 1e-4  # Increased from 1e-5 for better convergence
     

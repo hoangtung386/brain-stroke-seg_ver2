@@ -4,6 +4,7 @@ Replace old LCNN with this new architecture
 """
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
 from models.losses import SymFormerLoss
