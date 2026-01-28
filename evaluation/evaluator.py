@@ -37,12 +37,24 @@ class Evaluator:
         
         print(f"Evaluating on {len(self.val_loader)} batches...")
         with torch.no_grad():
-            for images, masks in tqdm(self.val_loader):
+            for batch in tqdm(self.val_loader):
+                # Handle both 2-tuple (images, masks) and 3-tuple (images, masks, metadata)
+                if len(batch) == 3:
+                    images, masks, metadata = batch
+                else:
+                    images, masks = batch
+                    metadata = None
+                
                 images = images.to(self.device)
                 masks = masks.to(self.device)
                 
+                # Move metadata to device if present
+                if metadata is not None:
+                    metadata = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
+                               for k, v in metadata.items()}
+                
                 # Forward
-                outputs, _, _ = self.model(images) # SymFormer returns (out, clusters, map)
+                outputs, _, _ = self.model(images, metadata) # SymFormer returns (out, clusters, map)
                 preds = torch.argmax(outputs, dim=1)
                 
                 # Compute batch metrics
