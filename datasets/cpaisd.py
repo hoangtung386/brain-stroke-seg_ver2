@@ -35,24 +35,45 @@ class CPAISDDataset(BaseDataset):
             self.window_center = 40  # HU
             self.window_width = 80   # HU
         
+        # Filtering parameters
+        self.skip_empty_slices = getattr(config, 'SKIP_EMPTY_SLICES', False) if config else False
+        self.negative_sample_ratio = getattr(config, 'NEGATIVE_SAMPLE_RATIO', 0.2) if config else 0.2
+        
         # Build sample index
-        self.samples = self._build_index()
+        self.samples, self.filter_stats = self._build_index()
         
         print(f"\n{split.upper()} Dataset (CPAISD):")
         print(f"  Root: {self.dataset_root}")
-        print(f"  Total slices: {len(self.samples)}")
+        if self.skip_empty_slices:
+            print(f"  ⚠️  Empty slice filtering: ENABLED")
+            print(f"  Total slices (before filter): {self.filter_stats['total']}")
+            print(f"  Empty slices: {self.filter_stats['empty']} (dropped: {self.filter_stats['dropped_empty']})")
+            print(f"  Non-empty slices: {self.filter_stats['non_empty']}")
+            print(f"  Final dataset size: {len(self.samples)}")
+        else:
+            print(f"  Total slices: {len(self.samples)}")
         print(f"  HU windowing: {use_hu_window}")
         print(f"  Adjacent slices (T): {T}")
     
     def _build_index(self):
-        """Build index of all slices"""
+        """Build index of all slices with optional empty slice filtering"""
+        import random
+        random.seed(42)  # For reproducible negative sampling
+        
         samples = []
+        filter_stats = {
+            'total': 0,
+            'empty': 0,
+            'non_empty': 0,
+            'dropped_empty': 0
+        }
+        
         # Support both 'dataset_APIS/dataset/train' and direct 'train' if root is correct
         split_path = Path(self.dataset_root) / self.split
         
         if not split_path.exists():
             print(f"WARNING: {split_path} does not exist!")
-            return []
+            return [], filter_stats
 
         for study_dir in sorted(split_path.iterdir()):
             if not study_dir.is_dir():
@@ -69,15 +90,40 @@ class CPAISDDataset(BaseDataset):
                 if not (slice_dir / "mask.npz").exists():
                     continue
                 
+                filter_stats['total'] += 1
+                
+                # Check if slice is empty (optional filtering)
+                is_empty = False
+                if self.skip_empty_slices:
+                    mask_file = slice_dir / "mask.npz"
+                    try:
+                        mask_data = np.load(mask_file)
+                        mask_key = list(mask_data.keys())[0]
+                        mask = mask_data[mask_key]
+                        is_empty = (mask.sum() == 0)
+                        
+                        if is_empty:
+                            filter_stats['empty'] += 1
+                            # Apply negative sampling: keep only X% of empty slices
+                            if random.random() > self.negative_sample_ratio:
+                                filter_stats['dropped_empty'] += 1
+                                continue  # Skip this slice
+                        else:
+                            filter_stats['non_empty'] += 1
+                    except Exception as e:
+                        # If error loading mask, include the slice anyway
+                        print(f"Warning: Error checking mask for {slice_dir}: {e}")
+                
                 samples.append({
                     'study': study_dir.name,
                     'slice_idx': idx,
                     'slice_path': slice_dir,
                     'num_slices': num_slices,
-                    'all_slices': slice_dirs
+                    'all_slices': slice_dirs,
+                    'is_empty': is_empty
                 })
         
-        return samples
+        return samples, filter_stats
     
     def __len__(self):
         return len(self.samples)

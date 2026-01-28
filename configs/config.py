@@ -37,10 +37,14 @@ class Config:
     WINDOW_CENTER = 35
     WINDOW_WIDTH = 85
     
+    # Dataset filtering for class balance
+    SKIP_EMPTY_SLICES = True        # Filter out slices with no stroke annotation
+    NEGATIVE_SAMPLE_RATIO = 0.2     # Keep 20% of empty slices as negative examples
+    
     # Batch size (optimized for RTX 3090 24GB VRAM)
     BATCH_SIZE = 20  # Increased from 4 for better GPU utilization
     NUM_EPOCHS = 150
-    LEARNING_RATE = 1e-5
+    LEARNING_RATE = 1e-4  # Increased from 1e-5 for better convergence
     
     # DataLoader parameters (optimized for multi-core CPU)
     NUM_WORKERS = 8  # Increased from 4 to maximize I/O throughput
