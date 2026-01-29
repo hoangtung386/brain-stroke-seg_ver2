@@ -338,18 +338,30 @@ def main():
     # 2. IMPORT AFTER SETTING ENV VAR
     import torch
     import torch.nn as nn
-    from configs.config import get_config  # ← CORRECT
+    from configs.config import get_config, Config  # ← CORRECT: Import Config class
     from datasets import create_dataloaders
     
-    # 3. GET CORRECT CONFIG
+    # 3. GET CORRECT CONFIG (Initial setup)
     dataset_name = args.dataset if args.dataset else 'cpaisd'
-    ConfigClass = get_config(dataset_name)  # ← RENAME VARIABLE
+    ConfigClass = get_config(dataset_name) # Get base config for the dataset
+    
+    # 4. SETUP CONFIG (Dynamic updates)
+    # ConfigClass is now an instance of the specific dataset config.
+    # We can directly modify its attributes.
+    
+    # Dynamic Class Configuration
+    if dataset_name.lower() == 'brats':
+        print("\n🔧 Configuring for BraTS Dataset (Native 4 classes)")
+        ConfigClass.NUM_CLASSES = 4
+    elif dataset_name.lower() == 'rsna':
+         # RSNA typically 6 classes for subtype or 2 for binary
+         # For now, keep default or configurable
+         pass
+         
+    # 5. SETUP DEVICE VARIABLE (This comment is now correctly placed before device setup)
     
     print(f"\n{'='*60}")
     print(f"📦 DATASET: {ConfigClass.DATASET_NAME}")
-    print(f"🔧 CONFIG CLASS: {ConfigClass.__name__}")
-    print(f"{'='*60}")
-    
     # 4. SETUP DIRECTORIES
     ConfigClass.create_directories()
     
