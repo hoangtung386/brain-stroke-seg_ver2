@@ -2,14 +2,44 @@
 Training script for SymFormer
 Replace old LCNN with this new architecture
 """
+import os
+import sys
+import argparse
+
+# ============================================================================
+# EARLY CONFIGURATION (Before importing torch)
+# ============================================================================
+def early_device_setup():
+    """Parse --devices arg and set CUDA_VISIBLE_DEVICES before torch import"""
+    # Create a partial parser just for devices to avoid conflicts
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--devices', type=str, default=None)
+    
+    # Parse known args only (ignore other args like --dataset for now)
+    args, _ = parser.parse_known_args()
+    
+    if args.devices:
+        os.environ["CUDA_VISIBLE_DEVICES"] = args.devices
+        print(f"🎯 [Early Setup] Setting CUDA_VISIBLE_DEVICES={args.devices}")
+        print(f"   (Physical GPU {args.devices} will be mapped to cuda:0)")
+    else:
+        # Don't set empty string as it might hide all GPUs in some envs
+        # Only set if explicitly requested empty (e.g. for CPU testing)
+        if args.devices == "":
+             os.environ["CUDA_VISIBLE_DEVICES"] = ""
+             print("🎯 [Early Setup] Using CPU (no GPUs specified)")
+
+early_device_setup()
+
+# ============================================================================
+# STANDARD IMPORTS (Now safe)
+# ============================================================================
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from tqdm import tqdm
 from models.losses import SymFormerLoss
-import argparse
-import os
 import wandb
 import csv
 
@@ -244,13 +274,37 @@ class SymFormerTrainer:
                 else:
                      model_state = self.model.state_dict()
 
+                # Construct dynamic filename
+                dataset_suffix = self.config.DATASET_NAME if self.config.DATASET_NAME else "unknown"
+                best_model_path = os.path.join(self.config.CHECKPOINT_DIR, f'symformer_best_{dataset_suffix}.pth')
+                
                 torch.save({
                     'epoch': epoch,
                     'model_state_dict': model_state,
                     'optimizer_state_dict': self.optimizer.state_dict(),
-                    'best_dice': self.best_dice
-                }, 'checkpoints/symformer_best.pth')
-                print(f"✓ Best model saved! Dice: {val_dice:.4f}")
+                    'best_dice': self.best_dice,
+                    'config': self.config.to_dict() if hasattr(self.config, 'to_dict') else str(self.config)
+                }, best_model_path)
+                print(f"✓ Best model saved to {best_model_path}! Dice: {val_dice:.4f}")
+            
+            # Save Last Model (Every Epoch)
+            dataset_suffix = self.config.DATASET_NAME if self.config.DATASET_NAME else "unknown"
+            last_model_path = os.path.join(self.config.CHECKPOINT_DIR, f'symformer_{dataset_suffix}.pth')
+            
+            # Get state dict again if not already got
+            if self.multi_gpu:
+                 model_state = self.model.module.state_dict()
+            else:
+                 model_state = self.model.state_dict()
+
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model_state,
+                'optimizer_state_dict': self.optimizer.state_dict(),
+                'val_dice': val_dice,
+                 'config': self.config.to_dict() if hasattr(self.config, 'to_dict') else str(self.config)
+            }, last_model_path)
+            # print(f"  (Last model saved to {last_model_path})")
             
             # Log
             history_dict = {
@@ -327,18 +381,9 @@ def parse_args():
 def main():
     args = parse_args()
     
-    # 1. SET CUDA_VISIBLE_DEVICES BEFORE IMPORTING TORCH
-    if args.devices:
-        os.environ["CUDA_VISIBLE_DEVICES"] = args.devices
-        print(f"🎯 Setting CUDA_VISIBLE_DEVICES={args.devices}")
-    else:
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
-        print("🎯 Using CPU (no GPUs specified)")
-    
-    # 2. IMPORT AFTER SETTING ENV VAR
-    import torch
-    import torch.nn as nn
-    from configs.config import get_config, Config  # ← CORRECT: Import Config class
+    # 2. IMPORT CONFIG & DATASETS
+    # (Torch is already imported globally)
+    from configs.config import get_config, Config
     from datasets import create_dataloaders
     
     # 3. GET CORRECT CONFIG (Initial setup)
