@@ -32,14 +32,18 @@ class Config:
     INIT_FEATURES = 32
     IMAGE_SIZE = (512, 512)
     
-    # HU Windowing (Brain)
+    # HU Windowing (Brain Stroke Optimized)
     USE_HU_WINDOW = True
-    WINDOW_CENTER = 35
-    WINDOW_WIDTH = 85
+    # Stroke Window: High contrast for intraparenchymal differentiation
+    WINDOW_CENTER = 40 
+    WINDOW_WIDTH = 40
     
     # Dataset filtering for class balance
     SKIP_EMPTY_SLICES = True        # Filter out slices with no stroke annotation
-    NEGATIVE_SAMPLE_RATIO = 0.2     # Keep 20% of empty slices as negative examples
+    NEGATIVE_SAMPLE_RATIO = 0.05    # Reducing from 0.2 to 0.05 to drastically reduce background dominance
+    
+    # Loss Weights
+    FP_PENALTY_WEIGHT = 0.3         # New: Penalty for predicting stroke in background regions
     
     # Batch size (optimized for RTX 3090 24GB VRAM)
     BATCH_SIZE = 20  # Increased from 5 (CPAISD) , 20 (BraTS) for better GPU utilization
@@ -64,9 +68,9 @@ class Config:
     TRANSFORMER_NUM_LAYERS = 2
     TRANSFORMER_EMBED_DIM = 1024  # Should match bottleneck channels
     
-    # Normalization
-    MEAN = [55.1385 / 255.0]    # = 0.2162
-    STD = [46.2948 / 255.0]     # = 0.1841
+    # Normalization (Optimized for Stroke Window WC=40, WW=40)
+    MEAN = [0.6234]    # Computed from 500 samples
+    STD = [0.3369]     # Computed from 500 samples
     
     WEIGHT_DECAY = 1e-4
     

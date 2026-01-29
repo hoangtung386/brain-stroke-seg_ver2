@@ -42,6 +42,7 @@ from tqdm import tqdm
 from models.losses import SymFormerLoss
 import wandb
 import csv
+from monai.networks.utils import one_hot
 
 
 # ============================================================================
@@ -75,7 +76,8 @@ class SymFormerTrainer:
         # SymFormer Loss
         self.criterion = SymFormerLoss(
             num_classes=config.NUM_CLASSES,
-            class_weights=class_weights
+            class_weights=class_weights,
+            fp_penalty_weight=getattr(config, 'FP_PENALTY_WEIGHT', 0.0)
         )
         
         # Optimizer (unchanged)
@@ -220,19 +222,22 @@ class SymFormerTrainer:
                 # - y_pred: (B, C, H, W) with softmax applied OR one-hot
                 # - y: (B, 1, H, W) for class indices OR (B, C, H, W) for one-hot
                 
-                # Apply softmax to get probabilities
-                output_probs = F.softmax(output, dim=1)  # (B, C, H, W)
-                
-                # Convert masks to proper format
+                # CRITICAL FIX: Ensure HARD DICE calculation (Standard for validation)
+                # 0. Prepare masks
                 if masks.ndim == 3:
-                    # (B, H, W) -> (B, 1, H, W)
-                    masks_metric = masks.unsqueeze(1)
+                     masks_metric = masks.unsqueeze(1)
                 else:
-                    # Already (B, 1, H, W) or (B, C, H, W)
-                    masks_metric = masks
+                     masks_metric = masks
+
+                # 1. Get discrete predictions (Argmax)
+                y_pred_idx = torch.argmax(output, dim=1, keepdim=True)
+                y_pred_onehot = one_hot(y_pred_idx, num_classes=self.config.NUM_CLASSES)
                 
-                # Update metric with probabilities
-                self.dice_metric(y_pred=output_probs, y=masks_metric)
+                # 2. Get one-hot targets
+                y_target_onehot = one_hot(masks_metric, num_classes=self.config.NUM_CLASSES)
+                
+                # 3. Update metric
+                self.dice_metric(y_pred=y_pred_onehot, y=y_target_onehot)
                 
                 pbar.set_postfix({'val_loss': f'{loss.item():.4f}'})
         

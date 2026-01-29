@@ -170,8 +170,13 @@ class CPAISDDataset(BaseDataset):
                     image = np.clip(image, lower, upper)
                     image = (image - lower) / (upper - lower)
                 else:
-                    # Simple min-max
                     image = (image - image.min()) / (image.max() - image.min() + 1e-8)
+        
+        # Apply Z-Score Normalization (Global for both DICOM and NPZ)
+        if self.config and hasattr(self.config, 'MEAN') and hasattr(self.config, 'STD'):
+            mean = self.config.MEAN[0] if isinstance(self.config.MEAN, list) else self.config.MEAN
+            std = self.config.STD[0] if isinstance(self.config.STD, list) else self.config.STD
+            image = (image - mean) / (std + 1e-8)
         
         # Load mask
         mask_npz = np.load(slice_path / "mask.npz")

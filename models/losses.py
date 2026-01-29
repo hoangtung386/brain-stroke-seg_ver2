@@ -21,7 +21,7 @@ class ImprovedSymFormerLoss(nn.Module):
     def __init__(self, num_classes=2, class_weights=None,
                  dice_weight=0.5, focal_weight=0.3, ce_weight=0.2,
                  cluster_weight=0.15, symmetry_weight=0.05,
-                 boundary_weight=0.1):
+                 boundary_weight=0.1, fp_penalty_weight=0.3):  # New FP Penalty
         super().__init__()
         
         self.num_classes = num_classes
@@ -50,6 +50,7 @@ class ImprovedSymFormerLoss(nn.Module):
         self.cluster_weight = cluster_weight
         self.symmetry_weight = symmetry_weight
         self.boundary_weight = boundary_weight
+        self.fp_penalty_weight = fp_penalty_weight
         
         # Multi-scale weights (deep supervision)
         # Higher weight for finer scales
@@ -77,10 +78,37 @@ class ImprovedSymFormerLoss(nn.Module):
             self.ce_weight * ce_loss
         )
         
+        # --- CRITICAL FIX: False Positive Penalty ---
+        # Penalize predictions where GT is background (0)
+        # target_dice is one-hot (B, C, H, W) or index (B, 1, H, W) convert to one-hot if needed
+        # Assuming softmax output (B, C, H, W)
+        
+        # Identify background ground truth (where class 0 is 1)
+        # y_true_bg = 1 if pixel is background
+        if target_dice.shape[1] == 1: # Indices
+            y_true_bg = (target_dice == 0).float()
+        else: # One-hot
+            y_true_bg = target_dice[:, 0:1, :, :]
+            
+        # We want to penalize ANY prediction of classes > 0 in these regions
+        # sum(prob(c)) for c > 0 = 1 - prob(0)
+        # predictions for non-background classes
+        y_pred_nobg = 1.0 - output[:, 0:1, :, :]
+        
+        # Penalty = Average probability of non-bg classes in bg regions
+        # L_fp = mean( y_pred_nobg * y_true_bg )
+        fp_loss = (y_pred_nobg * y_true_bg).mean()
+        
+        main_loss += self.fp_penalty_weight * fp_loss
+        # --------------------------------------------
+        
         return main_loss, {
             'dice': dice_loss.item(),
             'focal': focal_loss.item(),
-            'ce': ce_loss.item()
+            'dice': dice_loss.item(),
+            'focal': focal_loss.item(),
+            'ce': ce_loss.item(),
+            'fp_penalty': fp_loss.item()
         }
     
     def compute_cluster_loss(self, cluster_outputs, target):
