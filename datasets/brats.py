@@ -34,9 +34,20 @@ class BraTSDataset(BaseDataset):
         
         self.dataset_root = Path(dataset_root)
         self.modality = modality  # 't2f', 't1c', 't1n', 't2w'
-        self.label_mode = label_mode  # 'native', 'binary', 'wt_tc_et'
-        self.use_cache = use_cache
         self.config = config
+        
+        # Auto-configure label mode based on config
+        if label_mode == 'native' and config and hasattr(config, 'NUM_CLASSES'):
+            if config.NUM_CLASSES == 3:
+                self.label_mode = 'stroke_compatible'
+            elif config.NUM_CLASSES == 2:
+                self.label_mode = 'binary'
+            else:
+                self.label_mode = label_mode
+        else:
+            self.label_mode = label_mode
+            
+        self.use_cache = use_cache
         
         # Determine data directory
         if split == 'train':
@@ -50,11 +61,16 @@ class BraTSDataset(BaseDataset):
             else:
                 self.data_dir = self.dataset_root
         
-        self.samples = self._build_index()
-        
         # Cache volumes
         self.volume_cache = {} if use_cache else None
         self.max_cache_size = 3
+        
+        # Filtering parameters
+        self.skip_empty_slices = getattr(config, 'SKIP_EMPTY_SLICES', False) if config else False
+        self.negative_sample_ratio = getattr(config, 'NEGATIVE_SAMPLE_RATIO', 0.2) if config else 0.2
+        
+        # Build sample index (Improved with filtering)
+        self.samples, self.filter_stats = self._build_index()
         
         # Load normalization stats from Config OR JSON
         self.norm_stats = self._load_norm_stats()
@@ -63,7 +79,14 @@ class BraTSDataset(BaseDataset):
         print(f"  Root: {self.data_dir}")
         print(f"  Modality: {self.modality}")
         print(f"  Label mode: {self.label_mode}")
-        print(f"  Total slices: {len(self.samples)}")
+        if self.skip_empty_slices:
+            print(f"  ⚠️  Empty slice filtering: ENABLED")
+            print(f"  Total slices (before filter): {self.filter_stats['total']}")
+            print(f"  Empty slices: {self.filter_stats['empty']} (dropped: {self.filter_stats['dropped_empty']})")
+            print(f"  Non-empty slices: {self.filter_stats['non_empty']}")
+            print(f"  Final dataset size: {len(self.samples)}")
+        else:
+            print(f"  Total slices: {len(self.samples)}")
         print(f"  Adjacent slices (T): {T}")
         print(f"  Caching: {'Enabled' if use_cache else 'Disabled'}")
         if self.norm_stats:
@@ -104,14 +127,25 @@ class BraTSDataset(BaseDataset):
         return None
     
     def _build_index(self):
-        """Xây dựng index các slices có nội dung"""
+        """Xây dựng index các slices có nội dung với filtering"""
+        import nibabel as nib
+        import random
+        random.seed(42)
+        
         samples = []
+        filter_stats = {
+            'total': 0,
+            'empty': 0,
+            'non_empty': 0,
+            'dropped_empty': 0
+        }
         
         if not self.data_dir.exists():
             print(f"WARNING: {self.data_dir} does not exist!")
-            return []
+            return [], filter_stats
         
         studies = sorted([d for d in self.data_dir.iterdir() if d.is_dir()])
+        print(f"  Scanning {len(studies)} volumes for valid slices...")
         
         for study_path in studies:
             study_id = study_path.name
@@ -133,9 +167,38 @@ class BraTSDataset(BaseDataset):
                 img_proxy = nib.load(img_path)
                 num_slices = img_proxy.shape[2]
                 
+                # Load label volume if filtering is enabled
+                seg_data = None
+                if self.skip_empty_slices and seg_path.exists():
+                    seg_data = nib.load(seg_path).get_fdata().astype(np.int8)
+                
                 # Bỏ qua slices rìa (thường là background)
                 margin = 20
-                for i in range(margin, num_slices - margin):
+                start_slice = margin
+                end_slice = num_slices - margin
+                
+                if start_slice >= end_slice: # Volume quá mỏng
+                    start_slice, end_slice = 0, num_slices
+                
+                for i in range(start_slice, end_slice):
+                    filter_stats['total'] += 1
+                    
+                    is_empty = False
+                    if self.skip_empty_slices and seg_data is not None:
+                        # Check slice i content
+                        # Assuming Native: 0=BG, others=Tumor
+                        # If label_mode changes, 'non-empty' means having meaningful labels
+                        has_tumor = np.any(seg_data[..., i] > 0)
+                        if not has_tumor:
+                            is_empty = True
+                            filter_stats['empty'] += 1
+                            # Negative sampling
+                            if random.random() > self.negative_sample_ratio:
+                                filter_stats['dropped_empty'] += 1
+                                continue
+                        else:
+                            filter_stats['non_empty'] += 1
+                    
                     samples.append({
                         'study_id': study_id,
                         'slice_idx': i,
@@ -146,7 +209,7 @@ class BraTSDataset(BaseDataset):
             except Exception as e:
                 print(f"Error reading {study_id}: {e}")
         
-        return samples
+        return samples, filter_stats
     
     def _normalize_volume(self, volume):
         """
@@ -277,6 +340,17 @@ class BraTSDataset(BaseDataset):
             mapped[seg_slice == 2] = 1  # Edema only -> WT
             mapped[seg_slice == 1] = 2  # NCR -> TC
             mapped[seg_slice == 3] = 3  # ET -> ET
+            return mapped
+            
+        elif self.label_mode == 'stroke_compatible':
+            # Map to 3 classes (0, 1, 2) for config.NUM_CLASSES = 3
+            # 0: Background
+            # 1: Core (Necrotic + Non-Enhancing + Enhancing) = BraTS 1 + 3
+            # 2: Edema = BraTS 2
+            mapped = np.zeros_like(seg_slice, dtype=np.int64)
+            mapped[seg_slice == 2] = 2  # Edema -> 2
+            mapped[seg_slice == 1] = 1  # NCR -> 1
+            mapped[seg_slice == 3] = 1  # ET -> 1 (Merge with Core)
             return mapped
         
         else:
