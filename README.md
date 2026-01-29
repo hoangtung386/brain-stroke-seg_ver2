@@ -100,32 +100,57 @@ After training, you can evaluate your trained model on the validation set using 
 #### Basic Usage
 
 ```powershell
-# Evaluate with a trained checkpoint
-python evaluate.py --checkpoint path/to/checkpoint.pth
+# Evaluate CPAISD (Stroke) model
+python evaluate.py \
+    --checkpoint checkpoints/symformer_epoch_50.pth \
+    --dataset cpaisd
+
+# Evaluate BraTS (Tumor) model
+python evaluate.py \
+    --checkpoint checkpoints/symformer_brats_epoch_50.pth \
+    --dataset brats
 ```
 
 #### Advanced Options
 
 ```powershell
-# Specify output directory
-python evaluate.py --checkpoint checkpoints/best_model.pth --output-dir results/eval_run1
+# Specify output directory and device
+python evaluate.py \
+    --checkpoint checkpoints/best_model.pth \
+    --dataset cpaisd \
+    --output-dir results/eval_run1 \
+    --device cuda:1
 
 # Custom batch size for evaluation
-python evaluate.py --checkpoint checkpoints/best_model.pth --batch-size 4
-
-# Specify device (cuda/cpu)
-python evaluate.py --checkpoint checkpoints/best_model.pth --device cuda
-
-# Control number of visualization samples
-python evaluate.py --checkpoint checkpoints/best_model.pth --num-samples 10
+python evaluate.py \
+    --checkpoint checkpoints/best_model.pth \
+    --dataset brats \
+    --batch-size 4 \
+    --device cuda:0
 
 # Full example with all options
 python evaluate.py \
     --checkpoint checkpoints/symformer_epoch_50.pth \
+    --dataset cpaisd \
     --output-dir evaluation_results \
     --batch-size 2 \
     --num-samples 5 \
-    --device cuda
+    --device cuda:1
+```
+
+#### Parallel Training and Evaluation
+
+You can run training on one GPU and evaluation on another simultaneously:
+
+```powershell
+# Terminal 1: Train on GPU 0
+python train.py --dataset brats --devices 0
+
+# Terminal 2: Evaluate on GPU 1 (won't conflict)
+python evaluate.py \
+    --checkpoint checkpoints/symformer_brats_50.pth \
+    --dataset brats \
+    --device cuda:1
 ```
 
 #### Evaluation Outputs
@@ -151,7 +176,10 @@ The evaluation script generates the following outputs in the `evaluation_results
 conda activate brain_seg_stroke
 
 # 2. Evaluate best checkpoint from training
-python evaluate.py --checkpoint checkpoints/best_model.pth --device cuda
+python evaluate.py \
+    --checkpoint checkpoints/best_model.pth \
+    --dataset cpaisd \
+    --device cuda
 
 # 3. Check results
 cat evaluation_results/final_evaluation_report.txt
