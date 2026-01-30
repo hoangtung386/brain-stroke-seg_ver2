@@ -13,6 +13,7 @@ class Config:
     
     DATA_PATHS = {
         'cpaisd': 'dataset_APIS/dataset',
+        'cpaisd_enhanced': 'dataset_APIS/dataset',
         'brats': 'Dataset_BraTs',
         'rsna': 'datasets/RSNA'
     }
