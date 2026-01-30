@@ -55,7 +55,41 @@ class Evaluator:
                                for k, v in metadata.items()}
                 
                 # Forward
-                outputs, _, _ = self.model(images, metadata) # SymFormer returns (out, clusters, map)
+                outputs, aligned_slices, alignment_params, _, _ = self.model(
+                    images, metadata=metadata, return_alignment=True
+                )
+                
+                # --- ALIGN MASK TO MATCH IMAGE ---
+                # 1. Get center slice params
+                num_slices = images.shape[1]
+                center_idx = num_slices // 2
+                center_params = alignment_params[center_idx]
+                
+                # 2. Prepare mask
+                if masks.ndim == 3:
+                    masks_for_align = masks.unsqueeze(1).float()
+                else:
+                    masks_for_align = masks.float()
+                
+                # 3. Apply Transform
+                # Use nearest for masks to preserve classes
+                if hasattr(self.model, 'module'):
+                    align_net = self.model.module.alignment_net
+                else:
+                    align_net = self.model.alignment_net
+                    
+                aligned_masks, _ = align_net.apply_transform(
+                    masks_for_align, 
+                    center_params, 
+                    mode='nearest'
+                )
+                
+                # 4. Convert back
+                if masks.ndim == 3:
+                    masks = aligned_masks.long().squeeze(1)
+                else:
+                    masks = aligned_masks.long()
+
                 preds = torch.argmax(outputs, dim=1)
                 
                 # Compute batch metrics

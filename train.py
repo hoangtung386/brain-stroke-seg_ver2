@@ -129,13 +129,43 @@ class SymFormerTrainer:
             self.optimizer.zero_grad()
             
             # Forward pass
-            output, cluster_outputs, asymmetry_map = self.model(
-                images, metadata=metadata, return_alignment=False
+            # Forward pass (Get alignment info)
+            output, aligned_slices, alignment_params, cluster_outputs, asymmetry_map = self.model(
+                images, metadata=metadata, return_alignment=True
             )
             
-            # Compute loss
+            # --- CRITICAL FIX: Align Mask to match Aligned Image ---
+            # 1. Get center slice params (images: B, T, H, W -> slices: T)
+            num_slices = images.shape[1]
+            center_idx = num_slices // 2
+            # alignment_params is list of T tensors, each (B, 3)
+            center_params = alignment_params[center_idx] 
+            
+            # 2. Prepare mask for transformation (B, H, W) -> (B, 1, H, W)
+            if masks.ndim == 3:
+                masks_for_align = masks.unsqueeze(1).float()
+            else:
+                masks_for_align = masks.float()
+                
+            # 3. Apply Transform (Nearest Neighbor for Labels)
+            # Handle DataParallel wrapper
+            align_net = self.model.module.alignment_net if self.multi_gpu else self.model.alignment_net
+            
+            aligned_masks, _ = align_net.apply_transform(
+                masks_for_align, 
+                center_params, 
+                mode='nearest' # IMPORTANT: Preserve integer classes
+            )
+            
+            # 4. Convert back to Long (B, H, W)
+            if masks.ndim == 3:
+                aligned_masks = aligned_masks.long().squeeze(1)
+            else:
+                aligned_masks = aligned_masks.long()
+                
+            # Compute loss with ALIGNED masks
             loss, loss_dict = self.criterion(
-                output, masks, cluster_outputs, asymmetry_map
+                output, aligned_masks, cluster_outputs, asymmetry_map
             )
             
             # Backward pass
@@ -206,9 +236,30 @@ class SymFormerTrainer:
                     }
                 
                 # Forward
-                output, cluster_outputs, asymmetry_map = self.model(
-                    images, metadata=metadata, return_alignment=False
+                output, aligned_slices, alignment_params, cluster_outputs, asymmetry_map = self.model(
+                    images, metadata=metadata, return_alignment=True
                 )
+                
+                # --- CRITICAL FIX: Align Mask here too ---
+                num_slices = images.shape[1]
+                center_idx = num_slices // 2
+                center_params = alignment_params[center_idx] 
+                
+                if masks.ndim == 3:
+                    masks_for_align = masks.unsqueeze(1).float()
+                else:
+                    masks_for_align = masks.float()
+
+                align_net = self.model.module.alignment_net if self.multi_gpu else self.model.alignment_net
+                aligned_masks, _ = align_net.apply_transform(masks_for_align, center_params, mode='nearest')
+                
+                if masks.ndim == 3:
+                    aligned_masks = aligned_masks.long().squeeze(1)
+                else:
+                    aligned_masks = aligned_masks.long()
+                    
+                # Update masks variable for metric calculation
+                masks = aligned_masks
                 
                 # Loss
                 loss, _ = self.criterion(

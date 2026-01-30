@@ -85,7 +85,7 @@ class AlignmentNetwork(nn.Module):
         
         return theta
     
-    def apply_transform(self, x, params):
+    def apply_transform(self, x, params, mode='bilinear'):
         """Apply transformation to input"""
         # Allow gradients to flow through grid generation
         # params_stable = params.detach() # Removed to fix gradient flow
@@ -98,7 +98,7 @@ class AlignmentNetwork(nn.Module):
         x_transformed = F.grid_sample(
             x, grid, 
             align_corners=True,   # Changed from False
-            mode='bilinear',
+            mode=mode,            # Dynamic mode (bilinear for images, nearest for masks)
             padding_mode='border' # Add padding mode
         )
         return x_transformed, theta

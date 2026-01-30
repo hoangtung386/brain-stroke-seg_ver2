@@ -49,6 +49,9 @@ def get_dataset_class(name):
     name = name.lower()
     if name == 'cpaisd' or name == 'apis':
         return CPAISDDataset
+    elif name == 'cpaisd_enhanced':
+        from .cpaisd_enhanced import EnhancedCPAISDDataset
+        return EnhancedCPAISDDataset
     elif name == 'brats': 
         return BraTSDataset
     elif name == 'rsna':

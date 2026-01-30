@@ -222,10 +222,27 @@ class RSNAConfig(Config):
     NUM_CLASSES = 2 # Placeholder: 0=bg, 1=injury
     USE_HU_WINDOW = True # CT
     
+class CPAISDEnhancedConfig(CPAISDConfig):
+    """
+    Configuration for Enhanced Stroke Segmentation (3-Channel Strategy)
+    Channel 1: Original Stroke Window (Anchor)
+    Channel 2: Context Window
+    Channel 3: Enhanced (Detail Boost)
+    """
+    DATASET_NAME = 'cpaisd_enhanced'
+    NUM_CHANNELS = 3 # Multi-channel input
+    MULTICHANNEL = True
+    
+    # Adjust weights if needed for multi-channel
+    # Maybe slightly higher alignment weight?
+    ALIGNMENT_WEIGHT = 0.05
+
 def get_config(dataset_name):
     """Factory to get config by name"""
     if dataset_name == 'cpaisd':
         return CPAISDConfig
+    elif dataset_name == 'cpaisd_enhanced':
+        return CPAISDEnhancedConfig
     elif dataset_name == 'brats':
         return BraTSConfig
     elif dataset_name == 'rsna':

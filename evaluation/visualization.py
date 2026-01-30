@@ -92,16 +92,47 @@ def visualize_overlay_predictions(model, val_loader, device, class_names,
                            for k, v in metadata.items()}
             
             # Get predictions
-            outputs, _, _ = model(images, metadata)  # SymFormer returns (out, clusters, map)
+            outputs, aligned_slices, alignment_params, _, _ = model(
+                images, metadata=metadata, return_alignment=True
+            )
+            
+            # --- ALIGN MASK TO MATCH IMAGE ---
+            center_idx = images.shape[1] // 2
+            center_params = alignment_params[center_idx]
+            
+            # Use AlignmentNetwork for transform
+            if hasattr(model, 'module'):
+                align_net = model.module.alignment_net
+            else:
+                align_net = model.alignment_net
+
+            # Prepare mask (B, H, W) -> (B, 1, H, W)
+            if masks.ndim == 3:
+                mask_in = masks.unsqueeze(1).float()
+            else:
+                mask_in = masks.float()
+
+            aligned_masks, _ = align_net.apply_transform(
+                mask_in, center_params, mode='nearest'
+            )
+            
+            # Use ALIGNED mask for visualization
+            if masks.ndim == 3:
+                mask_aligned = aligned_masks.long().squeeze(1)
+            else:
+                mask_aligned = aligned_masks.long()
+                
             preds = torch.argmax(outputs, dim=1)
             
             # Convert to numpy
-            # Use center slice for image (images is B, T, H, W)
-            center_slice_idx = images.shape[1] // 2
-            img_np = images[0, center_slice_idx].cpu().numpy()
+            # Use center slice for image: Need the ALIGNED image slice
+            # aligned_slices is a list of T tensors, each (B, 1, H, W)
+            # We want the center slice from aligned_slices
+            center_aligned_img = aligned_slices[center_idx] # (B, 1, H, W)
+            img_np = center_aligned_img[0, 0].cpu().numpy()
             
             pred_np = preds[0].cpu().numpy()
-            mask_np = masks[0].cpu().numpy()
+            mask_np = mask_aligned[0].cpu().numpy()
             
             # Ensure mask is 2D (H, W)
             if mask_np.ndim == 3 and mask_np.shape[0] == 1:
@@ -183,16 +214,45 @@ def plot_per_class_comparison(model, val_loader, device, class_names,
                            for k, v in metadata.items()}
             
             # Get predictions
-            outputs, _, _ = model(images, metadata)  # SymFormer returns (out, clusters, map)
+            outputs, aligned_slices, alignment_params, _, _ = model(
+                images, metadata=metadata, return_alignment=True
+            )
+            
+            # --- ALIGN MASK TO MATCH IMAGE ---
+            center_idx = images.shape[1] // 2
+            center_params = alignment_params[center_idx]
+            
+            # Use AlignmentNetwork for transform
+            if hasattr(model, 'module'):
+                align_net = model.module.alignment_net
+            else:
+                align_net = model.alignment_net
+                
+            # Prepare mask (B, H, W) -> (B, 1, H, W)
+            if masks.ndim == 3:
+                mask_in = masks.unsqueeze(1).float()
+            else:
+                mask_in = masks.float()
+
+            aligned_masks, _ = align_net.apply_transform(
+                mask_in, center_params, mode='nearest'
+            )
+            
+            # Use ALIGNED mask for visualization
+            if masks.ndim == 3:
+                mask_aligned = aligned_masks.long().squeeze(1)
+            else:
+                mask_aligned = aligned_masks.long()
+
             preds = torch.argmax(outputs, dim=1)
             
             # Convert to numpy
-            # Use center slice for image
-            center_slice_idx = images.shape[1] // 2
-            img_np = images[0, center_slice_idx].cpu().numpy()
+            # Use center slice for image (aligned)
+            center_aligned_img = aligned_slices[center_idx]
+            img_np = center_aligned_img[0, 0].cpu().numpy()
             
             pred_np = preds[0].cpu().numpy()
-            mask_np = masks[0].cpu().numpy()
+            mask_np = mask_aligned[0].cpu().numpy()
             
             # Ensure mask is 2D (H, W)
             if mask_np.ndim == 3 and mask_np.shape[0] == 1:
