@@ -56,7 +56,39 @@ For CPAISD (Stroke), we have a new **Enhanced Pipeline** (Windowing + CLAHE + De
   python visualize_enhancement.py
   ```
 
+
 ---
+
+### 4. Evaluation
+To evaluate a trained model and generate visualizations, use the `evaluate.py` script.
+
+**Arguments:**
+- `--checkpoint`: Path to the trained model checkpoint `.pth` file (Required).
+- `--output-dir`: Directory to save evaluation results and visualizations (Default: `./output`).
+- `--batch-size`: Batch size for evaluation (Default: `1`).
+- `--num-samples`: Number of samples to visualize. Set to `-1` to visualize all validation samples (Default: `-1`).
+- `--device`: Device to run evaluation on (e.g., `cuda`, `cuda:0`, `cpu`) (Default: `cuda` if available).
+- `--dataset`: Dataset name to use (`cpaisd`, `brats`, `rsna`) (Default: `cpaisd`).
+
+**Examples:**
+
+- **Basic Evaluation on CPAISD**:
+  ```bash
+  python evaluate.py --checkpoint checkpoints/best_model.pth --dataset cpaisd
+  ```
+
+- **Evaluate on specific GPU and save to custom folder**:
+  ```bash
+  python evaluate.py --checkpoint checkpoints/best_model.pth --dataset cpaisd --device cuda:1 --output-dir ./results_experiment1
+  ```
+
+- **Visualize only 10 samples**:
+  ```bash
+  python evaluate.py --checkpoint checkpoints/best_model.pth --num-samples 10
+  ```
+
+---
+
 
 ## 🐛 Critical Fixes Verification
 
