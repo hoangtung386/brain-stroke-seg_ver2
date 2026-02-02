@@ -47,7 +47,7 @@ class Config:
     FP_PENALTY_WEIGHT = 0.3         # New: Penalty for predicting stroke in background regions
     
     # Batch size (optimized for RTX 3090 24GB VRAM)
-    BATCH_SIZE = 2  # Reduced to 2 to prevent OOM with 3-channel enhancement
+    BATCH_SIZE = 20  # Reduced to 2 to prevent OOM with 3-channel enhancement
     NUM_EPOCHS = 150
     LEARNING_RATE = 1e-4  # Increased from 1e-5 for better convergence
     
