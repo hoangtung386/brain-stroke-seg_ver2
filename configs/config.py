@@ -191,6 +191,11 @@ class BraTSConfig(Config):
     
     USE_HU_WINDOW = False # MRI does not use HU
     
+    # 🚀 HIGHER LEARNING RATE for better convergence
+    # Previous: 1e-4 (from base Config) was too slow
+    # New: 1e-3 helps model learn to predict all 4 classes
+    LEARNING_RATE = 1e-3
+    
     # Normalization Strategy
     # Options: 'global' (uses dataset-wide stats) or 'per_volume' (standard)
     NORMALIZATION_MODE = 'global' 
