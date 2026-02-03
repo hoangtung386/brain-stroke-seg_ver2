@@ -53,13 +53,15 @@ def compute_class_weights(dataset, num_classes=2, num_samples=None):
     total_pixels = pixel_counts.sum()
     weights = total_pixels / (num_classes * pixel_counts)
     
-    # --- CRITICAL FIX FOR STROKE OVERPREDICTION ---
-    # Boost minority classes significantly to penalize missing them
-    # But relies on FP penalty in loss to stop overprediction
-    if num_classes >= 3:
-        print("  ⚡ Boosting weights for Stroke classes (Core: 10x, Penumbra: 8x)")
-        weights[1] *= 10.0  # Core
-        weights[2] *= 8.0   # Penumbra
+    # --- OLD FIX FOR STROKE OVERPREDICTION (DISABLED) ---
+    # This was designed for CPAISD (stroke) dataset with 3 classes:
+    # 0=Background, 1=Core, 2=Penumbra
+    # 
+    # BUT it incorrectly boosts BraTS classes:
+    # BraTS: 0=BG, 1=NCR, 2=Edema, 3=ET (4 classes, not 3!)
+    #
+    # Solution: Let natural class frequency determine weights
+    # The loss function already handles imbalance via weighted CE
     # ----------------------------------------------
     
     # Normalize weights so they sum to num_classes (optional but good for stability)

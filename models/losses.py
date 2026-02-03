@@ -201,9 +201,11 @@ class ImprovedSymFormerLoss(nn.Module):
         # 1. Penalize asymmetry in healthy regions (should be symmetric)
         healthy_sym_loss = (asymmetry_map * healthy_mask).mean()
         
-        # 2. Reward asymmetry in stroke regions (should be asymmetric)
-        # Use negative loss to encourage high asymmetry
-        stroke_asym_loss = -torch.log(asymmetry_map * stroke_mask + 1e-6).mean()
+        # 2. 🔧 FIX: Encourage asymmetry in stroke regions 
+        # OLD: stroke_asym_loss = -torch.log(asymmetry_map * stroke_mask + 1e-6).mean()
+        #      ↑ This creates NEGATIVE loss values! BUG!
+        # NEW: Use L1 distance to encourage high asymmetry
+        stroke_asym_loss = torch.clamp(1.0 - (asymmetry_map * stroke_mask).mean(), min=0.0)
         
         # 3. Margin-based contrastive loss
         # Asymmetry in stroke should be HIGHER than in healthy
