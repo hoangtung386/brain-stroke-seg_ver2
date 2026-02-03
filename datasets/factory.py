@@ -100,27 +100,48 @@ def create_dataloaders(config):
     DatasetClass = get_dataset_class(dataset_name)
     
     # Train Dataset
-    train_dataset = DatasetClass(
-        dataset_root=dataset_root,
-        split='train',
-        T=config.T,
-        transform=None,
-        config=config # Pass config object
-    )
+    # BraTS-specific: Add label_mode
+    if dataset_name.lower() == 'brats':
+        train_dataset = DatasetClass(
+            dataset_root=dataset_root,
+            split='train',
+            T=config.T,
+            transform=None,
+            label_mode='native',  # Explicit: Use 4 classes
+            config=config
+        )
+    else:
+        train_dataset = DatasetClass(
+            dataset_root=dataset_root,
+            split='train',
+            T=config.T,
+            transform=None,
+            config=config # Pass config object
+        )
     
     # Val Dataset
     # Try different split names
     val_split = 'val'
     if dataset_root and not os.path.exists(os.path.join(dataset_root, 'val')):
         val_split = 'test'
-        
-    val_dataset = DatasetClass(
-        dataset_root=dataset_root,
-        split=val_split,
-        T=config.T,
-        transform=None,
-        config=config # Pass config object
-    )
+    
+    if dataset_name.lower() == 'brats':
+        val_dataset = DatasetClass(
+            dataset_root=dataset_root,
+            split=val_split,
+            T=config.T,
+            transform=None,
+            label_mode='native',  # Explicit: Use 4 classes
+            config=config
+        )
+    else:
+        val_dataset = DatasetClass(
+            dataset_root=dataset_root,
+            split=val_split,
+            T=config.T,
+            transform=None,
+            config=config # Pass config object
+        )
     
     train_loader = DataLoader(
         train_dataset,

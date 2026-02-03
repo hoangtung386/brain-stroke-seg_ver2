@@ -35,17 +35,7 @@ class BraTSDataset(BaseDataset):
         self.dataset_root = Path(dataset_root)
         self.modality = modality  # 't2f', 't1c', 't1n', 't2w'
         self.config = config
-        
-        # Auto-configure label mode based on config
-        if label_mode == 'native' and config and hasattr(config, 'NUM_CLASSES'):
-            if config.NUM_CLASSES == 3:
-                self.label_mode = 'stroke_compatible'
-            elif config.NUM_CLASSES == 2:
-                self.label_mode = 'binary'
-            else:
-                self.label_mode = label_mode
-        else:
-            self.label_mode = label_mode
+        self.label_mode = label_mode  # Use the label_mode as passed
             
         self.use_cache = use_cache
         

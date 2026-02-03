@@ -290,6 +290,12 @@ class SymFormerTrainer:
                 # 3. Update metric
                 self.dice_metric(y_pred=y_pred_onehot, y=y_target_onehot)
                 
+                # DEBUG: Print class distributions (first batch only)
+                if pbar.n == 0:
+                    print(f"\n[DEBUG] Unique predictions: {torch.unique(y_pred_idx).cpu().tolist()}")
+                    print(f"[DEBUG] Unique targets: {torch.unique(masks).cpu().tolist()}")
+                    print(f"[DEBUG] Prediction shape: {y_pred_idx.shape}, Target shape: {masks.shape}")
+                
                 pbar.set_postfix({'val_loss': f'{loss.item():.4f}'})
         
         # Average metrics

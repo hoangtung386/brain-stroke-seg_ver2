@@ -74,16 +74,51 @@ python train.py --dataset cpaisd_enhanced --devices "0,1"
 
 ### BraTS Dataset (Brain Tumor MRI)
 
+**Dataset Configuration:**
+- **Classes**: 4 (Background, Necrotic Core, Edema, Enhancing Tumor)
+- **Modality**: T2-FLAIR MRI
+- **Input Size**: 240x240 (native BraTS resolution)
+- **Normalization**: Global Z-Score normalization with dataset-wide statistics
+
+**Training Commands:**
+
 ```powershell
-# Single GPU (cuda:0)
+# 🎯 Single GPU Training (CUDA 0 only)
 python train.py --devices "0" --dataset brats
 
-# Single GPU (cuda:1)
+# 🎯 Single GPU Training (CUDA 1 only) - Useful if CUDA 0 is busy
 python train.py --devices "1" --dataset brats
 
-# Multi-GPU
+# ⚡ Multi-GPU Training (Both GPUs in Parallel - DataParallel)
 python train.py --devices "0,1" --dataset brats
 ```
+
+**GPU Configuration Examples:**
+
+| Command | Physical GPU(s) | PyTorch Device | Use Case |
+|---------|----------------|----------------|----------|
+| `--devices "0"` | GPU 0 only | `cuda:0` | Single GPU training |
+| `--devices "1"` | GPU 1 only | `cuda:0`* | Train on GPU 1 while GPU 0 is busy |
+| `--devices "0,1"` | GPU 0 & 1 | `cuda:0`, `cuda:1` | Faster training with DataParallel |
+
+*Note: When using `--devices "1"`, PyTorch remaps physical GPU 1 to `cuda:0`
+
+**Training Multiple Datasets Simultaneously:**
+
+You can run training on different datasets/GPUs in parallel:
+
+```powershell
+# Terminal 1 - Train BraTS on GPU 0
+python train.py --devices "0" --dataset brats
+
+# Terminal 2 - Train CPAISD on GPU 1 (simultaneously)
+python train.py --devices "1" --dataset cpaisd
+```
+
+**Expected Training Behavior:**
+- **First 5-10 epochs**: Val Dice may be low (0.05-0.20) as model learns
+- **After 20-30 epochs**: Should reach 0.40-0.60
+- **Convergence**: BraTS typically achieves 0.60-0.80+ Dice score
 
 ### RSNA Dataset (Abdominal Trauma CT)
 
@@ -140,13 +175,39 @@ python evaluate.py --checkpoint checkpoints/best_model_enhanced.pth --dataset cp
 
 ### BraTS Evaluation (Brain Tumor MRI)
 
-```powershell
-# Basic evaluation
-python evaluate.py --checkpoint checkpoints/best_model_brats.pth --dataset brats
+**Important**: Ensure you use the exact checkpoint saved during BraTS training (e.g., `symformer_best_brats.pth`).
 
-# Visualize only 10 samples
-python evaluate.py --checkpoint checkpoints/best_model_brats.pth --dataset brats --num-samples 10
+```powershell
+# 🎯 Basic evaluation (auto-detects GPU)
+python evaluate.py --checkpoint checkpoints/symformer_best_brats.pth --dataset brats
+
+# 🎯 Force specific GPU (useful if default GPU is busy)
+python evaluate.py --checkpoint checkpoints/symformer_best_brats.pth --dataset brats --device cuda:1
+
+# 📁 Save results to custom directory
+python evaluate.py --checkpoint checkpoints/symformer_best_brats.pth --dataset brats --output-dir ./results_brats
+
+# 🖼️ Visualize only 10 samples (faster for quick checks)
+python evaluate.py --checkpoint checkpoints/symformer_best_brats.pth --dataset brats --num-samples 10
+
+# 🔍 Full evaluation with all metrics
+python evaluate.py --checkpoint checkpoints/symformer_best_brats.pth --dataset brats --output-dir ./brats_full_eval
 ```
+
+**Metrics Reported:**
+- **Overall Dice Score**: Average across all tumor classes
+- **Class-specific Dice**: NCR, Edema, Enhancing Tumor
+- **Whole Tumor (WT)**: Classes 1+2+3
+- **Tumor Core (TC)**: Classes 1+3
+- **Enhancing Tumor (ET)**: Class 3 only
+
+**Troubleshooting:**
+
+If you get `Val Dice = 0.0000` during evaluation:
+1. Check checkpoint was trained with `--dataset brats` (not other datasets)
+2. Verify NUM_CLASSES in checkpoint matches 4 (BraTS native)
+3. Run with `--num-samples 1` to check if predictions are all zeros
+4. Enable debug mode in `evaluate.py` to print prediction distributions
 
 ### RSNA Evaluation (Abdominal Trauma CT)
 
