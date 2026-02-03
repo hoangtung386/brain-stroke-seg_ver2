@@ -73,6 +73,10 @@ class SymFormerTrainer:
             num_samples=500
         ).to(device)
         
+        # ✅ DEBUG: Print class weights to detect imbalance
+        print(f"[CRITICAL] Class weights: {class_weights.cpu().tolist()}")
+        print(f"[CRITICAL] NUM_CLASSES: {config.NUM_CLASSES}")
+        
         # SymFormer Loss
         self.criterion = SymFormerLoss(
             num_classes=config.NUM_CLASSES,
@@ -94,7 +98,12 @@ class SymFormerTrainer:
         
         # Metrics
         from monai.metrics import DiceMetric
-        self.dice_metric = DiceMetric(include_background=False, reduction='mean')
+        # ✅ FIX: Better reduction method for debugging
+        self.dice_metric = DiceMetric(
+            include_background=False, 
+            reduction='mean_batch',
+            get_not_nans=True  # Ignore NaN from empty predictions
+        )
         
         self.best_dice = 0.0
         self.history = []
@@ -178,6 +187,14 @@ class SymFormerTrainer:
             )
             
             self.optimizer.step()
+            
+            # NEW: Early warning if model not predicting all classes
+            with torch.no_grad():
+                pred_classes = torch.argmax(output, dim=1)
+                unique_preds = torch.unique(pred_classes)
+                if len(unique_preds) < self.config.NUM_CLASSES:
+                    if pbar.n % 50 == 0:  # Print every 50 batches to avoid spam
+                        print(f"\nWARNING: Model only predicting {len(unique_preds)}/{self.config.NUM_CLASSES} classes: {unique_preds.tolist()}")
             
             # Accumulate metrics
             total_loss += loss.item()
@@ -290,11 +307,24 @@ class SymFormerTrainer:
                 # 3. Update metric
                 self.dice_metric(y_pred=y_pred_onehot, y=y_target_onehot)
                 
-                # DEBUG: Print class distributions (first batch only)
+                # ✅ ENHANCED DEBUG: Print comprehensive class info (first batch only)
                 if pbar.n == 0:
                     print(f"\n[DEBUG] Unique predictions: {torch.unique(y_pred_idx).cpu().tolist()}")
                     print(f"[DEBUG] Unique targets: {torch.unique(masks).cpu().tolist()}")
                     print(f"[DEBUG] Prediction shape: {y_pred_idx.shape}, Target shape: {masks.shape}")
+                    
+                    # ✅ NEW: Per-class distribution
+                    print(f"\n[DEBUG] Per-class statistics:")
+                    for c in range(self.config.NUM_CLASSES):
+                        pred_count = (y_pred_idx == c).sum().item()
+                        gt_count = (masks == c).sum().item()
+                        print(f"  Class {c}: Pred={pred_count:6d} pixels, GT={gt_count:6d} pixels")
+                    
+                    # ✅ NEW: Output logits statistics
+                    print(f"\n[DEBUG] Output logits stats:")
+                    for c in range(self.config.NUM_CLASSES):
+                        class_logits = output[:, c, :, :]
+                        print(f"  Class {c}: Min={class_logits.min().item():7.4f}, Max={class_logits.max().item():7.4f}, Mean={class_logits.mean().item():7.4f}")
                 
                 pbar.set_postfix({'val_loss': f'{loss.item():.4f}'})
         
