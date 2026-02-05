@@ -195,7 +195,7 @@ class BraTSConfig(Config):
     # Issue: 5e-3 caused model collapse → only predicting class 0
     # Previous progression: 1e-4 → 1e-3 → 5e-3 (too high!) → 1e-4 (stable)
     # Lower LR prevents collapse to "all background" prediction
-    LEARNING_RATE = 5e-4  # ← Reduced 10x from 5e-3
+    LEARNING_RATE = 5e-4  # Reduced 10x from 5e-3
     
     # Normalization Strategy
     # Options: 'global' (uses dataset-wide stats) or 'per_volume' (standard)
